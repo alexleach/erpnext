@@ -37,21 +37,27 @@ class UKVatReport:
 		"""Return data for the report.
 
 		The report data is a list of rows, with each row being a list of cell values.
+		Grouped by VAT Box as required by HMRC Making Tax Digital API.
 		"""
 		data = []
 		vat_accounts = self.get_vat_accounts()
 		vat_account_names = [vat_accounts[acc]["name"] for acc in vat_accounts]
-		for doctype in ["Sales Invoice", "Purchase Invoice"]:
-			invoice_item_data = self._get_data(doctype, vat_account_names)
-
-			data.extend(invoice_item_data)
-			# data.extend({})
-		for d in data:
-			print(d)
+		
+		# Get all invoice data
+		sales_data = self._get_invoice_data("Sales Invoice", "Customer", vat_account_names)
+		purchase_data = self._get_invoice_data("Purchase Invoice", "Supplier", vat_account_names)
+		
+		# Group by VAT Box - show detailed invoices for VAT boxes (1 and 4)
+		# and summary for net amount boxes (6 and 7)
+		data.extend(self._format_box_section("Box 1", "VAT on Sales and All Other Outputs", sales_data, show_details=True))
+		data.extend(self._format_box_section("Box 4", "VAT on Purchases", purchase_data, show_details=True))
+		data.extend(self._format_box_summary("Box 6", "Total Value of Sales Excluding VAT", sales_data, amount_field="net_amount"))
+		data.extend(self._format_box_summary("Box 7", "Total Value of Purchases Excluding VAT", purchase_data, amount_field="net_amount"))
+		
 		return data
 
-	def _get_data(self, doctype, vat_account_names):
-		party = "Supplier" if doctype == "Purchase Invoice" else "Customer"
+	def _get_invoice_data(self, doctype, party, vat_account_names):
+		"""Get invoice data grouped by tax rate."""
 		invoices = self.get_invoices(doctype, party)
 		invoice_items = self.get_invoice_items(doctype, invoices)
 		grouped_invoice_items = self.get_items_based_on_tax_rate(doctype, invoices, vat_account_names)
@@ -60,32 +66,103 @@ class UKVatReport:
 			doctype, invoices, invoice_items, grouped_invoice_items
 		)
 
-		data = []
-
-		# Create section header
-		section_name = _("Purchases") if doctype == "Purchase Invoice" else _("Sales")
-
-		# fields = [col["fieldname"] for col in get_columns() if not col.get("hidden", False)]
-		for rate, details in consolidated_data.items():
-			label = frappe.bold(section_name + "- " + "Rate" + " " + str(rate) + "%")
-			section_head = {"invoice": label}
-			data.append(section_head)
-
-			total_gross = total_tax = total_net = 0
-			for row in details:
-				data.append(row)
-				total_gross += row["gross_amount"]
-				total_tax += row["tax_amount"]
-				total_net += row["net_amount"]
-			total = {
-				"invoice": frappe.bold(_("Total")),
-				"gross_amount": total_gross,
-				"tax_amount": total_tax,
-				"net_amount": total_net,
+		return consolidated_data
+	
+	def _format_box_section(self, box_number, box_description, data_by_rate, amount_field="tax_amount", show_details=True):
+		"""Format a VAT box section with its invoices grouped by rate."""
+		section_data = []
+		
+		# Add box header
+		box_header = {"invoice": frappe.bold(f"{box_number}: {_(box_description)}")}
+		section_data.append(box_header)
+		
+		# Calculate totals across all rates
+		box_total_tax = 0
+		box_total_net = 0
+		box_total_gross = 0
+		
+		# Add data for each rate
+		for rate, details in sorted(data_by_rate.items()):
+			# Add rate subsection header
+			rate_label = frappe.bold(f"  Rate: {rate}%")
+			section_data.append({"invoice": rate_label})
+			
+			# Add invoice details
+			rate_total_tax = 0
+			rate_total_net = 0
+			rate_total_gross = 0
+			
+			if show_details:
+				for row in details:
+					section_data.append(row)
+					rate_total_tax += row.get("tax_amount", 0)
+					rate_total_net += row.get("net_amount", 0)
+					rate_total_gross += row.get("gross_amount", 0)
+			else:
+				# Just accumulate totals without showing details
+				for row in details:
+					rate_total_tax += row.get("tax_amount", 0)
+					rate_total_net += row.get("net_amount", 0)
+					rate_total_gross += row.get("gross_amount", 0)
+			
+			# Add rate subtotal
+			rate_subtotal = {
+				"invoice": frappe.bold(f"    {_('Subtotal for Rate')} {rate}%"),
+				"tax_amount": rate_total_tax,
+				"net_amount": rate_total_net,
+				"gross_amount": rate_total_gross,
 			}
-			data.append(total)
-			data.append({})
-		return data
+			section_data.append(rate_subtotal)
+			box_total_tax += rate_total_tax
+			box_total_net += rate_total_net
+			box_total_gross += rate_total_gross
+		
+		# Add box total
+		box_total_row = {
+			"invoice": frappe.bold(f"{_('Total for')} {box_number}"),
+			"tax_amount": box_total_tax,
+			"net_amount": box_total_net,
+			"gross_amount": box_total_gross,
+		}
+		section_data.append(box_total_row)
+		section_data.append({})  # Empty row for spacing
+		
+		return section_data
+	
+	def _format_box_summary(self, box_number, box_description, data_by_rate, amount_field="net_amount"):
+		"""Format a summary VAT box section showing only totals by rate."""
+		section_data = []
+		
+		# Add box header
+		box_header = {"invoice": frappe.bold(f"{box_number}: {_(box_description)}")}
+		section_data.append(box_header)
+		
+		# Calculate totals across all rates
+		box_total = 0
+		
+		# Add totals for each rate (without invoice details)
+		for rate, details in sorted(data_by_rate.items()):
+			rate_total = 0
+			for row in details:
+				rate_total += row.get(amount_field, 0)
+			
+			# Add rate summary
+			rate_summary = {
+				"invoice": f"  Rate: {rate}%",
+				amount_field: rate_total,
+			}
+			section_data.append(rate_summary)
+			box_total += rate_total
+		
+		# Add box total
+		box_total_row = {
+			"invoice": frappe.bold(f"{_('Total for')} {box_number}"),
+			amount_field: box_total,
+		}
+		section_data.append(box_total_row)
+		section_data.append({})  # Empty row for spacing
+		
+		return section_data
 
 	def get_consolidated_data(self, doctype, invoices, invoice_items, items_based_on_tax_rate):
 		consolidated_data_map = {}
