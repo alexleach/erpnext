@@ -176,11 +176,26 @@ class UKVatReport:
 
 	def get_consolidated_data(self, doctype, invoices, invoice_items, items_based_on_tax_rate):
 		consolidated_data_map = {}
+		
+		# Create a map of invoice items for easy lookup
+		items_by_invoice = {}
+		for item in invoice_items:
+			inv = item.get("invoice")
+			items_by_invoice.setdefault(inv, []).append(item)
+		
 		for inv_data in invoices:
 			inv = inv_data.get("invoice")
 			rate_details = items_based_on_tax_rate.get(inv, {})
 			if not rate_details:
 				continue
+
+			# Determine place of supply for this invoice
+			place_of_supply = self.get_place_of_supply(inv_data)
+			
+			# Get items for this invoice to determine category
+			inv_items = items_by_invoice.get(inv, [])
+			# Use first item to determine category (could be enhanced to check all items)
+			item_category = self.get_item_category(inv_data, inv_items[0]) if inv_items else "Goods"
 
 			for rate, item_details in rate_details.items():
 				row = {
@@ -199,6 +214,9 @@ class UKVatReport:
 				row["gross_amount"] += item_details.get("gross_amount")
 				row["tax_amount"] += item_details.get("tax_amount")
 				row["net_amount"] += item_details.get("net_amount")
+				row["tax_category"] = inv_data.get("tax_category", "")
+				row["place_of_supply"] = place_of_supply
+				row["item_category"] = item_category
 
 				consolidated_data_map.setdefault(rate, [])
 				consolidated_data_map[rate].append(row)
@@ -260,6 +278,9 @@ class UKVatReport:
 				dt.posting_date.as_("posting_date"),
 				dt.grand_total.as_("net_amount"),
 				dt.total_taxes_and_charges.as_("tax_amount"),
+				dt.tax_category.as_("tax_category"),
+				dt.shipping_address_name.as_("shipping_address"),
+				dt.company_address.as_("company_address"),
 			)
 			.where(dt.docstatus == 1)
 			.where(dt.company == self.company)
@@ -276,23 +297,130 @@ class UKVatReport:
 	def get_invoice_items(
 		self, invoice_type: DF.Literal["Sales Invoice", "Purchase Invoice"], invoices: list[dict]
 	):
-		Item = DocType(invoice_type + " Item")
+		InvoiceItem = DocType(invoice_type + " Item")
+		Item = DocType("Item")
+		ItemGroup = DocType("Item Group")
+		
 		invoices = [_.invoice for _ in invoices]
 		if not invoices:
 			return []
+		
 		q = (
-			frappe.qb.from_(Item)
+			frappe.qb.from_(InvoiceItem)
+			.left_join(Item).on(InvoiceItem.item_code == Item.name)
+			.left_join(ItemGroup).on(Item.item_group == ItemGroup.name)
 			.select(
-				Item.item_code,
-				Item.parent.as_("invoice"),
-				Item.base_net_amount.as_("item_amount"),
-				Item.item_tax_template.as_("item_tax_template"),
+				InvoiceItem.item_code,
+				InvoiceItem.parent.as_("invoice"),
+				InvoiceItem.base_net_amount.as_("item_amount"),
+				InvoiceItem.item_tax_template.as_("item_tax_template"),
+				Item.item_group,
+				Item.tax_category.as_("item_tax_category"),
+				ItemGroup.tax_category.as_("item_group_tax_category"),
 			)
-			.where(Item.parent.isin(invoices))
+			.where(InvoiceItem.parent.isin(invoices))
 		)
-		print(q)
 		invoice_items = q.run(as_dict=True)
 		return invoice_items
+
+	def get_place_of_supply(self, invoice_data):
+		"""Determine place of supply based on tax category and address.
+		
+		Logic from README:
+		1. Check if document has tax category for EU/ROTW export
+		2. Check shipping address or company address
+		3. Default to United Kingdom
+		
+		Returns: "UK", "EU", "ROTW", or "Outside Scope"
+		"""
+		tax_category = invoice_data.get("tax_category", "")
+		
+		# Check document tax category first
+		if tax_category in ("UK VAT - EU Party", "UK Export Customer - EU"):
+			return "EU"
+		elif tax_category in ("UK VAT - Rest of World Party", "UK Export Customer - Rest of World"):
+			return "ROTW"
+		
+		# Check shipping address
+		shipping_address = invoice_data.get("shipping_address")
+		if shipping_address and frappe.db.exists("Address", shipping_address):
+			try:
+				address_country = frappe.get_cached_value("Address", shipping_address, "country")
+				if address_country == "United Kingdom":
+					return "UK"
+				# Check if address has tax category
+				address_tax_category = frappe.get_cached_value("Address", shipping_address, "tax_category")
+				if address_tax_category in ("UK VAT - EU Party", "UK Export Customer - EU"):
+					return "EU"
+				elif address_tax_category in ("UK VAT - Rest of World Party", "UK Export Customer - Rest of World"):
+					return "ROTW"
+			except Exception:
+				pass  # Address might not exist, continue to next check
+		
+		# Check company address
+		company_address = invoice_data.get("company_address")
+		if company_address and frappe.db.exists("Address", company_address):
+			try:
+				address_country = frappe.get_cached_value("Address", company_address, "country")
+				if address_country == "United Kingdom":
+					return "UK"
+			except Exception:
+				pass  # Address might not exist
+		
+		# Default to UK
+		return "UK"
+	
+	def get_item_category(self, invoice_data, item_data):
+		"""Determine if item is Goods or Services based on tax category.
+		
+		Logic from README:
+		1. Check document tax category
+		2. Check item tax category
+		3. Check item group tax category (walk up hierarchy)
+		4. Default to Goods
+		
+		Returns: "Goods" or "Services"
+		"""
+		# Check document tax category first
+		invoice_tax_category = invoice_data.get("tax_category", "")
+		if invoice_tax_category in ("Goods", "Services"):
+			return invoice_tax_category
+		
+		# Check item tax category
+		item_tax_category = item_data.get("item_tax_category", "")
+		if item_tax_category in ("Goods", "Services"):
+			return item_tax_category
+		
+		# Check item group tax category (and walk up hierarchy)
+		item_group = item_data.get("item_group")
+		if item_group:
+			category = self._get_item_group_category(item_group)
+			if category:
+				return category
+		
+		# Default to Goods
+		return "Goods"
+	
+	def _get_item_group_category(self, item_group_name):
+		"""Walk up item group hierarchy to find tax category.
+		
+		Returns: "Goods", "Services", or None
+		"""
+		if not item_group_name or not frappe.db.exists("Item Group", item_group_name):
+			return None
+		
+		try:
+			item_group = frappe.get_cached_doc("Item Group", item_group_name)
+			if item_group.tax_category in ("Goods", "Services"):
+				return item_group.tax_category
+			
+			# Check parent item group
+			if item_group.parent_item_group:
+				return self._get_item_group_category(item_group.parent_item_group)
+		except Exception:
+			pass  # Item group might not exist or be cached
+		
+		return None
 
 	def get_vat_accounts(self):
 		vat_accounts = frappe.get_list(
@@ -361,6 +489,9 @@ def get_columns() -> list[dict]:
 			"options": "party_type",
 			"width": 120,
 		},
+		{"fieldname": "tax_category", "label": _("Tax Category"), "fieldtype": "Link", "options": "Tax Category", "width": 120},
+		{"fieldname": "place_of_supply", "label": _("Place of Supply"), "fieldtype": "Data", "width": 100},
+		{"fieldname": "item_category", "label": _("Item Category"), "fieldtype": "Data", "width": 100},
 		{"fieldname": "net_amount", "label": "Net Amount", "fieldtype": "Currency", "width": 130},
 		{"fieldname": "tax_amount", "label": "Tax Amount", "fieldtype": "Currency", "width": 130},
 		{"fieldname": "gross_amount", "label": "Gross Amount", "fieldtype": "Currency", "width": 130},
