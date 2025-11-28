@@ -68,7 +68,7 @@ class UKVatReport:
 
 		return consolidated_data
 	
-	def _format_box_section(self, box_number, box_description, data_by_rate, amount_field="tax_amount", show_details=True):
+	def _format_box_section(self, box_number, box_description, data_by_rate, show_details=True):
 		"""Format a VAT box section with its invoices grouped by rate."""
 		section_data = []
 		
@@ -87,23 +87,10 @@ class UKVatReport:
 			rate_label = frappe.bold(f"  Rate: {rate}%")
 			section_data.append({"invoice": rate_label})
 			
-			# Add invoice details
-			rate_total_tax = 0
-			rate_total_net = 0
-			rate_total_gross = 0
-			
-			if show_details:
-				for row in details:
-					section_data.append(row)
-					rate_total_tax += row.get("tax_amount", 0)
-					rate_total_net += row.get("net_amount", 0)
-					rate_total_gross += row.get("gross_amount", 0)
-			else:
-				# Just accumulate totals without showing details
-				for row in details:
-					rate_total_tax += row.get("tax_amount", 0)
-					rate_total_net += row.get("net_amount", 0)
-					rate_total_gross += row.get("gross_amount", 0)
+			# Calculate rate totals and optionally show invoice details
+			rate_total_tax, rate_total_net, rate_total_gross = self._accumulate_amounts(
+				details, section_data if show_details else None
+			)
 			
 			# Add rate subtotal
 			rate_subtotal = {
@@ -128,6 +115,29 @@ class UKVatReport:
 		section_data.append({})  # Empty row for spacing
 		
 		return section_data
+	
+	def _accumulate_amounts(self, details, output_list=None):
+		"""Accumulate tax, net, and gross amounts from invoice details.
+		
+		Args:
+			details: List of invoice detail rows
+			output_list: Optional list to append detail rows to (if showing details)
+		
+		Returns:
+			Tuple of (total_tax, total_net, total_gross)
+		"""
+		total_tax = 0
+		total_net = 0
+		total_gross = 0
+		
+		for row in details:
+			if output_list is not None:
+				output_list.append(row)
+			total_tax += row.get("tax_amount", 0)
+			total_net += row.get("net_amount", 0)
+			total_gross += row.get("gross_amount", 0)
+		
+		return total_tax, total_net, total_gross
 	
 	def _format_box_summary(self, box_number, box_description, data_by_rate, amount_field="net_amount"):
 		"""Format a summary VAT box section showing only totals by rate."""
