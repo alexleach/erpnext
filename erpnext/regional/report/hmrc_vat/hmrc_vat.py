@@ -193,9 +193,13 @@ class UKVatReport:
 			place_of_supply = self.get_place_of_supply(inv_data)
 			
 			# Get items for this invoice to determine category
+			# Note: Using first item to determine category. In mixed invoices (goods + services),
+			# this may need enhancement to check all items or use invoice-level tax category
 			inv_items = items_by_invoice.get(inv, [])
-			# Use first item to determine category (could be enhanced to check all items)
-			item_category = self.get_item_category(inv_data, inv_items[0]) if inv_items else "Goods"
+			if inv_items:
+				item_category = self.get_item_category(inv_data, inv_items[0])
+			else:
+				item_category = "Goods"
 
 			for rate, item_details in rate_details.items():
 				row = {
@@ -354,8 +358,8 @@ class UKVatReport:
 					return "EU"
 				elif address_tax_category in ("UK VAT - Rest of World Party", "UK Export Customer - Rest of World"):
 					return "ROTW"
-			except Exception:
-				pass  # Address might not exist, continue to next check
+			except (frappe.DoesNotExistError, AttributeError):
+				pass  # Address might not exist or field not accessible
 		
 		# Check company address
 		company_address = invoice_data.get("company_address")
@@ -364,8 +368,8 @@ class UKVatReport:
 				address_country = frappe.get_cached_value("Address", company_address, "country")
 				if address_country == "United Kingdom":
 					return "UK"
-			except Exception:
-				pass  # Address might not exist
+			except (frappe.DoesNotExistError, AttributeError):
+				pass  # Address might not exist or field not accessible
 		
 		# Default to UK
 		return "UK"
@@ -401,12 +405,30 @@ class UKVatReport:
 		# Default to Goods
 		return "Goods"
 	
-	def _get_item_group_category(self, item_group_name):
+	def _get_item_group_category(self, item_group_name, visited=None):
 		"""Walk up item group hierarchy to find tax category.
+		
+		Args:
+			item_group_name: Name of the item group to check
+			visited: Set of already visited item groups (to detect cycles)
 		
 		Returns: "Goods", "Services", or None
 		"""
 		if not item_group_name or not frappe.db.exists("Item Group", item_group_name):
+			return None
+		
+		# Initialize visited set on first call
+		if visited is None:
+			visited = set()
+		
+		# Detect circular reference
+		if item_group_name in visited:
+			return None
+		
+		visited.add(item_group_name)
+		
+		# Limit recursion depth to prevent stack overflow
+		if len(visited) > 50:  # Reasonable max depth for item group hierarchy
 			return None
 		
 		try:
@@ -416,8 +438,8 @@ class UKVatReport:
 			
 			# Check parent item group
 			if item_group.parent_item_group:
-				return self._get_item_group_category(item_group.parent_item_group)
-		except Exception:
+				return self._get_item_group_category(item_group.parent_item_group, visited)
+		except (frappe.DoesNotExistError, AttributeError):
 			pass  # Item group might not exist or be cached
 		
 		return None
