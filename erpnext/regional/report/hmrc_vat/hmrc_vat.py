@@ -373,33 +373,24 @@ class UKVatReport:
 	def get_item_category(self, invoice_data, item_data):
 		"""Determine if item is Goods or Services based on tax category.
 		
-		The invoice's tax_category determines which item_tax_template is used.
-		In ERPNext, Items have a taxes child table where each row links a tax_category
-		to an item_tax_template. When the invoice is created, ERPNext selects the 
-		item_tax_template based on the invoice's tax_category.
+		In ERPNext's design:
+		- The invoice has a tax_category field that can be set to "Goods" or "Services"
+		- This tax_category is used as a filter when selecting item_tax_templates
+		- Items have a taxes child table where rows can specify which item_tax_template
+		  to use for a given tax_category
 		
-		For UK VAT purposes, we check if the invoice's tax category indicates
-		Goods or Services.
+		For UK VAT purposes, we primarily use the invoice's tax_category.
+		If not specified, we default to "Goods" as per UK README.md.
 		
 		Returns: "Goods" or "Services"
 		"""
-		# Check document tax category - this is the primary indicator
+		# Use invoice-level tax category - this is set explicitly by the user
 		invoice_tax_category = invoice_data.get("tax_category", "")
 		if invoice_tax_category in ("Goods", "Services"):
 			return invoice_tax_category
 		
-		# If invoice tax_category doesn't specify Goods/Services,
-		# we can check the item_tax_template name for hints
-		item_tax_template = item_data.get("item_tax_template", "")
-		if item_tax_template:
-			# Check if template name contains "Service" or "Goods"
-			template_lower = item_tax_template.lower()
-			if "service" in template_lower:
-				return "Services"
-			elif "goods" in template_lower or "good" in template_lower:
-				return "Goods"
-		
-		# Default to Goods for UK VAT
+		# Default to Goods for UK VAT (as per UK README.md)
+		# Most UK transactions are goods-based
 		return "Goods"
 	
 	def get_vat_accounts(self):
