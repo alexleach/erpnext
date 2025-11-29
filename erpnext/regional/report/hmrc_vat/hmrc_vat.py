@@ -303,7 +303,6 @@ class UKVatReport:
 	):
 		InvoiceItem = DocType(invoice_type + " Item")
 		Item = DocType("Item")
-		ItemGroup = DocType("Item Group")
 		
 		invoices = [_.invoice for _ in invoices]
 		if not invoices:
@@ -312,15 +311,12 @@ class UKVatReport:
 		q = (
 			frappe.qb.from_(InvoiceItem)
 			.left_join(Item).on(InvoiceItem.item_code == Item.name)
-			.left_join(ItemGroup).on(Item.item_group == ItemGroup.name)
 			.select(
 				InvoiceItem.item_code,
 				InvoiceItem.parent.as_("invoice"),
 				InvoiceItem.base_net_amount.as_("item_amount"),
 				InvoiceItem.item_tax_template.as_("item_tax_template"),
 				Item.item_group,
-				Item.tax_category.as_("item_tax_category"),
-				ItemGroup.tax_category.as_("item_group_tax_category"),
 			)
 			.where(InvoiceItem.parent.isin(invoices))
 		)
@@ -377,73 +373,35 @@ class UKVatReport:
 	def get_item_category(self, invoice_data, item_data):
 		"""Determine if item is Goods or Services based on tax category.
 		
-		Logic from README:
-		1. Check document tax category
-		2. Check item tax category
-		3. Check item group tax category (walk up hierarchy)
-		4. Default to Goods
+		The invoice's tax_category determines which item_tax_template is used.
+		In ERPNext, Items have a taxes child table where each row links a tax_category
+		to an item_tax_template. When the invoice is created, ERPNext selects the 
+		item_tax_template based on the invoice's tax_category.
+		
+		For UK VAT purposes, we check if the invoice's tax category indicates
+		Goods or Services.
 		
 		Returns: "Goods" or "Services"
 		"""
-		# Check document tax category first
+		# Check document tax category - this is the primary indicator
 		invoice_tax_category = invoice_data.get("tax_category", "")
 		if invoice_tax_category in ("Goods", "Services"):
 			return invoice_tax_category
 		
-		# Check item tax category
-		item_tax_category = item_data.get("item_tax_category", "")
-		if item_tax_category in ("Goods", "Services"):
-			return item_tax_category
+		# If invoice tax_category doesn't specify Goods/Services,
+		# we can check the item_tax_template name for hints
+		item_tax_template = item_data.get("item_tax_template", "")
+		if item_tax_template:
+			# Check if template name contains "Service" or "Goods"
+			template_lower = item_tax_template.lower()
+			if "service" in template_lower:
+				return "Services"
+			elif "goods" in template_lower or "good" in template_lower:
+				return "Goods"
 		
-		# Check item group tax category (and walk up hierarchy)
-		item_group = item_data.get("item_group")
-		if item_group:
-			category = self._get_item_group_category(item_group)
-			if category:
-				return category
-		
-		# Default to Goods
+		# Default to Goods for UK VAT
 		return "Goods"
 	
-	def _get_item_group_category(self, item_group_name, visited=None):
-		"""Walk up item group hierarchy to find tax category.
-		
-		Args:
-			item_group_name: Name of the item group to check
-			visited: Set of already visited item groups (to detect cycles)
-		
-		Returns: "Goods", "Services", or None
-		"""
-		if not item_group_name or not frappe.db.exists("Item Group", item_group_name):
-			return None
-		
-		# Initialize visited set on first call
-		if visited is None:
-			visited = set()
-		
-		# Detect circular reference
-		if item_group_name in visited:
-			return None
-		
-		visited.add(item_group_name)
-		
-		# Limit recursion depth to prevent stack overflow
-		if len(visited) > 50:  # Reasonable max depth for item group hierarchy
-			return None
-		
-		try:
-			item_group = frappe.get_cached_doc("Item Group", item_group_name)
-			if item_group.tax_category in ("Goods", "Services"):
-				return item_group.tax_category
-			
-			# Check parent item group
-			if item_group.parent_item_group:
-				return self._get_item_group_category(item_group.parent_item_group, visited)
-		except (frappe.DoesNotExistError, AttributeError):
-			pass  # Item group might not exist or be cached
-		
-		return None
-
 	def get_vat_accounts(self):
 		vat_accounts = frappe.get_list(
 			"Account",
