@@ -1452,6 +1452,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
@@ -1692,7 +1693,7 @@
  "idx": 204,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-13 18:36:46.704623",
+ "modified": "2026-06-25 18:23:05.341428",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice",

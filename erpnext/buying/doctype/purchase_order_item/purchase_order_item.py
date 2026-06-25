@@ -84,6 +84,9 @@ class PurchaseOrderItem(Document):
 		stock_uom: DF.Link
 		stock_uom_rate: DF.Currency
 		subcontracted_qty: DF.Float
+		subscription: DF.Link | None
+		subscription_end_date: DF.Date | None
+		subscription_start_date: DF.Date | None
 		supplier_part_no: DF.Data | None
 		supplier_quotation: DF.Link | None
 		supplier_quotation_item: DF.Link | None

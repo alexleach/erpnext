@@ -564,6 +564,8 @@ def make_sales_invoice(
 					"party_account_currency": "party_account_currency",
 					# commission_rate is no_copy (so it isn't carried on Duplicate), map it explicitly here
 					"commission_rate": "commission_rate",
+					"subscription_start_date": "from_date",
+					"subscription_end_date": "to_date",
 				},
 				"field_no_map": ["payment_terms_template"],
 				"validation": {"docstatus": ["=", 1]},

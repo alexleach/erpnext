@@ -178,6 +178,11 @@
   "column_break_yvzv",
   "inter_company_order_reference",
   "party_account_currency",
+  "subscription_section",
+  "subscription",
+  "column_break_aanf",
+  "subscription_start_date",
+  "subscription_end_date",
   "connections_tab"
  ],
  "fields": [
@@ -1759,6 +1764,35 @@
    "label": "Title",
    "no_copy": 1,
    "print_hide": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription",
+   "fieldtype": "Link",
+   "label": "Subscription",
+   "options": "Subscription"
+  },
+  {
+   "fieldname": "column_break_aanf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_start_date",
+   "fieldtype": "Date",
+   "label": "Subscription Start Date"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_end_date",
+   "fieldtype": "Date",
+   "label": "Subscription End Date"
   }
  ],
  "grid_page_length": 50,
@@ -1766,7 +1800,7 @@
  "idx": 105,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-21 12:46:13.250145",
+ "modified": "2026-06-25 18:22:23.820214",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Sales Order",

@@ -162,6 +162,11 @@
   "mps",
   "is_internal_supplier",
   "inter_company_order_reference",
+  "subscription_section",
+  "subscription",
+  "column_break_fjfp",
+  "subscription_start_date",
+  "subscription_end_date",
   "connections_tab"
  ],
  "fields": [
@@ -1291,6 +1296,35 @@
    "fieldname": "auto_repeat_section",
    "fieldtype": "Section Break",
    "label": "Auto Repeat"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription",
+   "fieldtype": "Link",
+   "label": "Subscription",
+   "options": "Subscription"
+  },
+  {
+   "fieldname": "column_break_fjfp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_start_date",
+   "fieldtype": "Date",
+   "label": "Subscription Start Date"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_end_date",
+   "fieldtype": "Date",
+   "label": "Subscription End Date"
   }
  ],
  "grid_page_length": 50,
@@ -1298,7 +1332,7 @@
  "idx": 105,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-05-28 12:34:19.659621",
+ "modified": "2026-06-25 18:22:46.400983",
  "modified_by": "Administrator",
  "module": "Buying",
  "name": "Purchase Order",

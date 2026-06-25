@@ -90,6 +90,9 @@ class PurchaseInvoiceItem(Document):
 		stock_qty: DF.Float
 		stock_uom: DF.Link | None
 		stock_uom_rate: DF.Currency
+		subscription: DF.Link | None
+		subscription_end_date: DF.Date | None
+		subscription_start_date: DF.Date | None
 		tax_withholding_category: DF.Link | None
 		total_weight: DF.Float
 		uom: DF.Link
