@@ -124,6 +124,11 @@
   "project",
   "dimension_col_break",
   "cost_center",
+  "subscription_section",
+  "subscription",
+  "column_break_dbnf",
+  "subscription_start_date",
+  "subscription_end_date",
   "section_break_82",
   "page_break"
  ],
@@ -1027,13 +1032,38 @@
    "label": "Delivered by Supplier",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription"
+  },
+  {
+   "fieldname": "subscription",
+   "fieldtype": "Link",
+   "label": "Subscription",
+   "options": "Subscription"
+  },
+  {
+   "fieldname": "column_break_dbnf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "subscription_start_date",
+   "fieldtype": "Date",
+   "label": "Subscription Start Date"
+  },
+  {
+   "fieldname": "subscription_end_date",
+   "fieldtype": "Date",
+   "label": "Subscription End Date"
   }
  ],
  "grid_page_length": 50,
  "idx": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-08-07 17:31:31.732720",
+ "modified": "2026-08-12 11:05:09.628731",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice Item",

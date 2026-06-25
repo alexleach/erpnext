@@ -1456,6 +1456,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
