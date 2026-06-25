@@ -968,6 +968,61 @@ class Subscription(Document):
 		}
 
 
+@frappe.whitelist()
+def get_linked_item_docs(subscription_name: str) -> dict:
+	"""Return total and open counts (plus names) of orders/invoices linked to this subscription.
+
+	Unions parent-level and item-level subscription fields so that documents where
+	any line item references this subscription are included alongside those where the
+	parent field is set directly.  The open_count mirrors ERPNext's notification_config
+	filters so the open-notification badge remains semantically correct.
+	"""
+	child_to_parent = {
+		"Purchase Order Item": "Purchase Order",
+		"Purchase Invoice Item": "Purchase Invoice",
+		"Sales Order Item": "Sales Order",
+		"Sales Invoice Item": "Sales Invoice",
+	}
+
+	# Mirrors ERPNext's notification_config open filters (erpnext.startup.notifications).
+	# Applied to the union set so the open-notification badge is semantically correct.
+	link_filters: dict[str, dict] = {
+		"Purchase Order": {"status": ["not in", ["Completed", "Closed"]], "docstatus": ["<", 2]},
+		"Sales Order": {"status": ["not in", ["Completed", "Closed"]], "docstatus": ["<", 2]},
+		"Purchase Invoice": {"outstanding_amount": [">", 0], "docstatus": ["<", 2]},
+		"Sales Invoice": {"outstanding_amount": [">", 0], "docstatus": ["<", 2]},
+	}
+
+	result = {}
+	for child_doctype, parent_doctype in child_to_parent.items():
+		parent_t = frappe.qb.DocType(parent_doctype)
+		child_t = frappe.qb.DocType(child_doctype)
+
+		via_parent = set(
+			(
+				frappe.qb.from_(parent_t)
+				.select(parent_t.name)
+				.where(parent_t.subscription == subscription_name)
+			).run(pluck="name")
+		)
+		via_child = set(
+			(
+				frappe.qb.from_(child_t)
+				.select(child_t.parent)
+				.where(child_t.subscription == subscription_name)
+			).run(pluck="parent")
+		)
+		names = sorted(via_parent | via_child)
+
+		open_count = 0
+		if names and parent_doctype in link_filters:
+			open_filters = {"name": ["in", names], **link_filters[parent_doctype]}
+			open_count = len(frappe.get_all(parent_doctype, filters=open_filters, limit=len(names) + 1))
+
+		result[parent_doctype] = {"count": len(names), "open_count": open_count, "names": names}
+	return result
+
+
 def is_prorate() -> int:
 	return cint(frappe.db.get_single_value("Subscription Settings", "prorate"))
 
