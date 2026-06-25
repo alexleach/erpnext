@@ -64,11 +64,8 @@ class Subscription(Document):
 	from typing import TYPE_CHECKING
 
 	if TYPE_CHECKING:
+		from erpnext.accounts.doctype.subscription_plan_detail.subscription_plan_detail import SubscriptionPlanDetail
 		from frappe.types import DF
-
-		from erpnext.accounts.doctype.subscription_plan_detail.subscription_plan_detail import (
-			SubscriptionPlanDetail,
-		)
 
 		additional_discount_amount: DF.Currency
 		additional_discount_percentage: DF.Percent
@@ -82,11 +79,7 @@ class Subscription(Document):
 		days_until_due: DF.Int
 		end_date: DF.Date | None
 		follow_calendar_months: DF.Check
-		generate_invoice_at: DF.Literal[
-			"Postpaid (bill at period end)",
-			"Prepaid (bill at period start)",
-			"Bill N days before period start",
-		]
+		generate_invoice_at: DF.Literal["Postpaid (bill at period end)", "Prepaid (bill at period start)", "Bill N days before period start"]
 		generate_new_invoices_past_due_date: DF.Check
 		next_billing_period_end: DF.Date | None
 		next_billing_period_start: DF.Date | None
@@ -97,9 +90,7 @@ class Subscription(Document):
 		purchase_tax_template: DF.Link | None
 		sales_tax_template: DF.Link | None
 		start_date: DF.Date | None
-		status: DF.Literal[
-			"", "Trialing", "Active", "Grace Period", "Cancelled", "Unpaid", "Completed", "Refunded"
-		]
+		status: DF.Literal["", "Trialing", "Active", "Grace Period", "Cancelled", "Unpaid", "Completed", "Refunded"]
 		submit_invoice: DF.Check
 		trial_period_end: DF.Date | None
 		trial_period_start: DF.Date | None
@@ -962,6 +953,61 @@ class Subscription(Document):
 			"period_start": None,
 			"period_end": None,
 		}
+
+
+@frappe.whitelist()
+def get_linked_item_docs(subscription_name: str) -> dict:
+	"""Return total and open counts (plus names) of orders/invoices linked to this subscription.
+
+	Unions parent-level and item-level subscription fields so that documents where
+	any line item references this subscription are included alongside those where the
+	parent field is set directly.  The open_count mirrors ERPNext's notification_config
+	filters so the open-notification badge remains semantically correct.
+	"""
+	child_to_parent = {
+		"Purchase Order Item": "Purchase Order",
+		"Purchase Invoice Item": "Purchase Invoice",
+		"Sales Order Item": "Sales Order",
+		"Sales Invoice Item": "Sales Invoice",
+	}
+
+	# Mirrors ERPNext's notification_config open filters (erpnext.startup.notifications).
+	# Applied to the union set so the open-notification badge is semantically correct.
+	link_filters: dict[str, dict] = {
+		"Purchase Order": {"status": ["not in", ["Completed", "Closed"]], "docstatus": ["<", 2]},
+		"Sales Order": {"status": ["not in", ["Completed", "Closed"]], "docstatus": ["<", 2]},
+		"Purchase Invoice": {"outstanding_amount": [">", 0], "docstatus": ["<", 2]},
+		"Sales Invoice": {"outstanding_amount": [">", 0], "docstatus": ["<", 2]},
+	}
+
+	result = {}
+	for child_doctype, parent_doctype in child_to_parent.items():
+		parent_t = frappe.qb.DocType(parent_doctype)
+		child_t = frappe.qb.DocType(child_doctype)
+
+		via_parent = set(
+			(
+				frappe.qb.from_(parent_t)
+				.select(parent_t.name)
+				.where(parent_t.subscription == subscription_name)
+			).run(pluck="name")
+		)
+		via_child = set(
+			(
+				frappe.qb.from_(child_t)
+				.select(child_t.parent)
+				.where(child_t.subscription == subscription_name)
+			).run(pluck="parent")
+		)
+		names = sorted(via_parent | via_child)
+
+		open_count = 0
+		if names and parent_doctype in link_filters:
+			open_filters = {"name": ["in", names], **link_filters[parent_doctype]}
+			open_count = len(frappe.get_all(parent_doctype, filters=open_filters, limit=len(names) + 1))
+
+		result[parent_doctype] = {"count": len(names), "open_count": open_count, "names": names}
+	return result
 
 
 def is_prorate() -> int:

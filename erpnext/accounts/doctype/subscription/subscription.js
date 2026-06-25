@@ -36,6 +36,7 @@ frappe.ui.form.on("Subscription", {
 		}
 
 		frm.trigger("render_billing_heatmap");
+		frm.trigger("fetch_subscription_linked");
 
 		if (frm.doc.status !== "Cancelled") {
 			frm.add_custom_button(
@@ -106,6 +107,60 @@ frappe.ui.form.on("Subscription", {
 		frm.call("get_billing_heatmap").then((r) => {
 			if (!r.message || !r.message.length) return;
 			render_heatmap(frm.get_field("billing_heatmap").$wrapper, r.message, frm.doc);
+		});
+	},
+
+	fetch_subscription_linked: function (frm) {
+		frm._subscription_linked = null;
+		frm._subscription_dashboard_ready = false;
+		frappe.call({
+			method: "erpnext.accounts.doctype.subscription.subscription.get_linked_item_docs",
+			args: { subscription_name: frm.doc.name },
+			callback(r) {
+				if (!r.message) return;
+				frm._subscription_linked = r.message;
+				frm.trigger("apply_subscription_counts");
+			},
+		});
+	},
+
+	dashboard_update: function (frm) {
+		frm._subscription_dashboard_ready = true;
+		frm.trigger("apply_subscription_counts");
+	},
+
+	// Runs when both the server data and the dashboard DOM are ready.
+	// Overwrites both the total count (.count) and the open-notification badge with
+	// the union count, and wires all three clickable elements to navigate using an
+	// exact `name in [...]` filter rather than the parent-field-only subscription filter.
+	apply_subscription_counts: function (frm) {
+		if (!frm._subscription_linked || !frm._subscription_dashboard_ready) return;
+
+		Object.entries(frm._subscription_linked).forEach(([doctype, data]) => {
+			const $link = frm.dashboard.transactions_area.find(
+				`.document-link[data-doctype="${doctype}"]`
+			);
+			if (!$link.length) return;
+
+			if (data.count > 0) {
+				$link.find(".count").text(data.count).removeClass("hidden");
+			}
+
+			// open_count mirrors ERPNext's notification_config filters applied to the
+			// union set — same semantics as Frappe's own open-notification, just wider.
+			if (data.open_count > 0) {
+				$link.find(".open-notification").text(data.open_count).removeClass("hidden");
+			} else {
+				$link.find(".open-notification").addClass("hidden");
+			}
+
+			if (data.names && data.names.length) {
+				// Replace Frappe's default handler on all three interactive elements.
+				$link.find(".badge-link, .count, .open-notification").off("click").on("click", function () {
+					frappe.route_options = { name: ["in", data.names] };
+					frappe.set_route("List", doctype, "List");
+				});
+			}
 		});
 	},
 });
