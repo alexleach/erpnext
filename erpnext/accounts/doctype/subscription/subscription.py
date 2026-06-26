@@ -882,8 +882,11 @@ class Subscription(Document):
 		return cells
 
 	def _billing_periods(self) -> list[dict]:
+		parent_doctype = self.invoice_document_type
+
+		# --- parent-level: invoices where the parent subscription field matches ---
 		invoices = frappe.get_all(
-			self.invoice_document_type,
+			parent_doctype,
 			filters={"subscription": self.name},
 			fields=[
 				"name",
@@ -917,7 +920,71 @@ class Subscription(Document):
 			if not invoice.is_return and invoice.from_date and invoice.to_date
 		]
 
+		# --- item-level: invoices found via child-table subscription field only ---
+		# These are multi-subscription invoices where only a line item references this
+		# subscription. Use the item's subscription_start/end_date for the period span
+		# and sum the item amounts for this subscription's share.
+		parent_names = {inv.name for inv in invoices}
+		item_periods = self._item_billing_periods(parent_doctype, parent_names)
+		periods.extend(item_periods)
+
+		periods.sort(key=lambda p: p["period_start"])
+
 		return [*periods, *self._planned_periods(periods)]
+
+	def _item_billing_periods(self, parent_doctype: str, exclude_names: set) -> list[dict]:
+		"""Billing periods sourced from child-table line items for multi-subscription invoices."""
+		items = frappe.get_all(
+			f"{parent_doctype} Item",
+			filters={"subscription": self.name},
+			fields=["parent", "subscription_start_date", "subscription_end_date", "amount"],
+		)
+
+		# Aggregate per invoice: span = min(start)..max(end), amount = sum of matching items.
+		# Skip items without date ranges — they cannot be plotted on the heatmap.
+		aggregated: dict[str, dict] = {}
+		for item in items:
+			if item.parent in exclude_names:
+				continue
+			if not item.subscription_start_date or not item.subscription_end_date:
+				continue
+			start, end = str(item.subscription_start_date), str(item.subscription_end_date)
+			if item.parent not in aggregated:
+				aggregated[item.parent] = {
+					"period_start": start,
+					"period_end": end,
+					"amount": flt(item.amount),
+				}
+			else:
+				agg = aggregated[item.parent]
+				agg["period_start"] = min(agg["period_start"], start)
+				agg["period_end"] = max(agg["period_end"], end)
+				agg["amount"] += flt(item.amount)
+
+		if not aggregated:
+			return []
+
+		parent_invoices = frappe.get_all(
+			parent_doctype,
+			filters={"name": ["in", list(aggregated.keys())]},
+			fields=["name", "status", "due_date", "docstatus", "is_return", "return_against"],
+		)
+
+		extra_credited = {
+			inv.return_against
+			for inv in parent_invoices
+			if inv.is_return and inv.docstatus == 1 and inv.return_against
+		}
+
+		return [
+			{
+				**aggregated[invoice.name],
+				"invoice": invoice.name,
+				"status": self._heatmap_status(invoice, invoice.name in extra_credited),
+			}
+			for invoice in parent_invoices
+			if not invoice.is_return
+		]
 
 	def _heatmap_status(self, invoice: dict, is_credited: bool) -> str:
 		if invoice.docstatus == 2:
