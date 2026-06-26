@@ -110,6 +110,12 @@ class SalesInvoiceItem(Document):
 		weight_uom: DF.Link | None
 	# end: auto-generated types
 
+	def validate(self) -> None:
+		if self.subscription and self.item_code:
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_item
+
+			validate_subscription_item(self.subscription, self.item_code)
+
 	def validate_cost_center(self, company: str):
 		cost_center_company = frappe.get_cached_value("Cost Center", self.cost_center, "company")
 		if cost_center_company != company:

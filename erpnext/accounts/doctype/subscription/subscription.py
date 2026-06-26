@@ -1090,6 +1090,68 @@ def get_linked_item_docs(subscription_name: str) -> dict:
 	return result
 
 
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_subscriptions_for_item(
+	doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict
+) -> list[list]:
+	"""Search query for the subscription link field on item child tables.
+
+	Restricts the list to subscriptions that contain a plan whose item matches
+	the current row's item_code, preventing mismatched subscription/item links.
+	"""
+	item_code = filters.get("item_code")
+	if not item_code:
+		return []
+
+	plan_names = frappe.get_all("Subscription Plan", filters={"item": item_code}, pluck="name")
+	if not plan_names:
+		return []
+
+	subscription_names = frappe.get_all(
+		"Subscription Plan Detail",
+		filters={"plan": ["in", plan_names]},
+		pluck="parent",
+		distinct=True,
+	)
+	if not subscription_names:
+		return []
+
+	conditions = [["name", "in", subscription_names]]
+	if txt:
+		conditions.append([searchfield, "like", f"%{txt}%"])
+
+	return frappe.get_all(
+		"Subscription",
+		filters=conditions,
+		fields=["name"],
+		limit_start=start,
+		limit_page_length=page_len,
+		as_list=True,
+	)
+
+
+def validate_subscription_item(subscription: str, item_code: str) -> None:
+	"""Raise if the subscription has no plan whose item matches item_code."""
+	plan_items = frappe.get_all(
+		"Subscription Plan",
+		filters={
+			"name": [
+				"in",
+				frappe.get_all("Subscription Plan Detail", filters={"parent": subscription}, pluck="plan"),
+			]
+		},
+		pluck="item",
+	)
+	if item_code not in plan_items:
+		frappe.throw(
+			_("Item {0} is not in any plan belonging to Subscription {1}.").format(
+				frappe.bold(item_code), frappe.bold(subscription)
+			),
+			title=_("Subscription Mismatch"),
+		)
+
+
 def is_prorate() -> int:
 	return cint(frappe.db.get_single_value("Subscription Settings", "prorate"))
 

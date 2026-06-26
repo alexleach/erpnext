@@ -40,6 +40,13 @@ frappe.ui.form.on("Purchase Order", {
 				},
 			};
 		});
+
+		frm.set_query("subscription", "items", function (doc, cdt, cdn) {
+			return {
+				query: "erpnext.accounts.doctype.subscription.subscription.get_subscriptions_for_item",
+				filters: { item_code: locals[cdt][cdn].item_code },
+			};
+		});
 	},
 
 	company: function (frm) {

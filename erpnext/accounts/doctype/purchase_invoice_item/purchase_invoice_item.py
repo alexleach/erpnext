@@ -104,4 +104,8 @@ class PurchaseInvoiceItem(Document):
 		wip_composite_asset: DF.Link | None
 	# end: auto-generated types
 
-	pass
+	def validate(self) -> None:
+		if self.subscription and self.item_code:
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_item
+
+			validate_subscription_item(self.subscription, self.item_code)
