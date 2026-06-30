@@ -1039,6 +1039,7 @@
    "label": "Subscription"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
@@ -1063,7 +1064,7 @@
  "idx": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-08-12 11:05:09.628731",
+ "modified": "2026-08-12 11:10:09.628731",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice Item",
