@@ -159,6 +159,31 @@ class TestSalesOrder(ERPNextTestSuite):
 		)
 		update_child_qty_rate("Sales Order", trans_item, so.name)
 
+	@ERPNextTestSuite.change_settings("Selling Settings", {"allow_negative_rates_for_items": 1})
+	def test_sales_order_negative_grand_total_allowed(self):
+		"""base_grand_total may be negative when allow_negative_rates_for_items is enabled."""
+		so = make_sales_order(qty=1, rate=-100, do_not_save=True)
+		so.save()
+		so.submit()
+		self.assertEqual(so.base_grand_total, -100)
+
+	@ERPNextTestSuite.change_settings("Selling Settings", {"allow_negative_rates_for_items": 0})
+	def test_sales_order_negative_grand_total_disallowed(self):
+		"""base_grand_total is rejected when allow_negative_rates_for_items is disabled."""
+		so = make_sales_order(qty=1, rate=-100, do_not_save=True)
+		self.assertRaises(frappe.ValidationError, so.save)
+
+	@ERPNextTestSuite.change_settings(
+		"Selling Settings", {"allow_multiple_items": 1, "allow_negative_rates_for_items": 0}
+	)
+	def test_sales_order_item_negative_rate_disallowed(self):
+		"""A negative item rate is rejected at submit when the setting is disabled,
+		even though the overall grand total stays positive."""
+		so = make_sales_order(qty=1, rate=100, do_not_save=True)
+		so.append("items", {"item_code": "_Test Item", "qty": 1, "rate": -10})
+		so.save()
+		self.assertRaises(frappe.ValidationError, so.submit)
+
 	@ERPNextTestSuite.change_settings("Selling Settings", {"allow_multiple_items": 1})
 	def test_sales_order_qty(self):
 		so = make_sales_order(qty=1, do_not_save=True)

@@ -54,6 +54,46 @@ class TestPurchaseOrder(ERPNextTestSuite):
 		po.save()
 		self.assertEqual(po.items[1].qty, 1)
 
+	@ERPNextTestSuite.change_settings("Buying Settings", {"allow_negative_rates_for_items": 1})
+	def test_purchase_order_negative_grand_total_allowed(self):
+		"""base_grand_total may be negative when allow_negative_rates_for_items is enabled."""
+		po = create_purchase_order(qty=1, rate=-500, do_not_save=True)
+		po.save()
+		po.submit()
+		self.assertEqual(po.base_grand_total, -500)
+
+	@ERPNextTestSuite.change_settings("Buying Settings", {"allow_negative_rates_for_items": 0})
+	def test_purchase_order_negative_grand_total_disallowed(self):
+		"""base_grand_total is rejected when allow_negative_rates_for_items is disabled."""
+		po = create_purchase_order(qty=1, rate=-500, do_not_save=True)
+		self.assertRaises(frappe.ValidationError, po.save)
+
+	@ERPNextTestSuite.change_settings(
+		"Buying Settings", {"allow_multiple_items": 1, "allow_negative_rates_for_items": 1}
+	)
+	def test_purchase_order_item_negative_rate_allowed(self):
+		"""A negative item rate is allowed at submit when the setting is enabled,
+		even though other items keep the overall grand total positive."""
+		po = create_purchase_order(qty=1, rate=500, do_not_save=True)
+		po.append(
+			"items", {"item_code": "_Test Item", "qty": 1, "rate": -100, "warehouse": "_Test Warehouse - _TC"}
+		)
+		po.save()
+		po.submit()
+
+	@ERPNextTestSuite.change_settings(
+		"Buying Settings", {"allow_multiple_items": 1, "allow_negative_rates_for_items": 0}
+	)
+	def test_purchase_order_item_negative_rate_disallowed(self):
+		"""A negative item rate is rejected at submit when the setting is disabled,
+		even though the overall grand total stays positive."""
+		po = create_purchase_order(qty=1, rate=500, do_not_save=True)
+		po.append(
+			"items", {"item_code": "_Test Item", "qty": 1, "rate": -100, "warehouse": "_Test Warehouse - _TC"}
+		)
+		po.save()
+		self.assertRaises(frappe.ValidationError, po.submit)
+
 	def test_purchase_order_zero_qty(self):
 		po = create_purchase_order(qty=0, do_not_save=True)
 
