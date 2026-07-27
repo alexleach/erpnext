@@ -261,7 +261,9 @@ class AccountsController(TransactionBase):
 
 			if not self.meta.get_field("is_return") or not self.is_return:
 				settings_doctype = (
-					"Selling Settings" if self.meta.has_field("customer") else "Buying Settings"
+					"Selling Settings"
+					if self.doctype in ["Sales Order", "Sales Invoice", "Delivery Note", "Quotation"]
+					else "Buying Settings"
 				)
 				if not frappe.get_single_value(settings_doctype, "allow_negative_rates_for_items"):
 					self.validate_value("base_grand_total", ">=", 0)
