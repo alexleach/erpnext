@@ -310,6 +310,7 @@ class SalesInvoice(SellingController):
 		FixedAssetService(self).validate_fixed_asset()
 		FixedAssetService(self).set_income_account_for_fixed_assets()
 		self.validate_item_cost_centers()
+		self.validate_item_subscriptions()
 		self.check_conversion_rate()
 		self.validate_accounts()
 
@@ -407,6 +408,10 @@ class SalesInvoice(SellingController):
 	def validate_item_cost_centers(self):
 		for item in self.items:
 			item.validate_cost_center(self.company)
+
+	def validate_item_subscriptions(self):
+		for item in self.items:
+			item.validate_subscription(self.customer)
 
 	def validate_income_account(self):
 		for item in self.get("items"):

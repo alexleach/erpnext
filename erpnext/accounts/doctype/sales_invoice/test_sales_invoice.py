@@ -5577,6 +5577,48 @@ class TestSalesInvoice(ERPNextTestSuite):
 		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
 		self.assertEqual(refreshed, {subscription_1.name, subscription_2.name})
 
+	def test_item_subscription_must_belong_to_invoice_customer(self):
+		"""An item's subscription must belong to the invoice's customer, even if the
+		subscription has a plan matching the item's item_code."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test Cross Customer Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test Cross Customer Plan", "qty": 1}]
+		)
+
+		si = create_sales_invoice(
+			item_code="_Test Non Stock Item", customer="_Test Customer", do_not_save=True
+		)
+		si.items[0].subscription = other_customer_subscription.name
+		self.assertRaises(frappe.ValidationError, si.insert)
+
+	def test_get_subscriptions_for_item_filters_by_customer(self):
+		from erpnext.accounts.doctype.subscription.subscription import get_subscriptions_for_item
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test Query Plan", item="_Test Non Stock Item", cost=100, currency="INR")
+		matching_subscription = create_subscription(
+			party="_Test Customer", plans=[{"plan": "_Test Query Plan", "qty": 1}]
+		)
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test Query Plan", "qty": 1}]
+		)
+
+		results = get_subscriptions_for_item(
+			"Subscription",
+			"",
+			"name",
+			0,
+			20,
+			{"item_code": "_Test Non Stock Item", "customer": "_Test Customer"},
+		)
+		names = {row[0] for row in results}
+		self.assertIn(matching_subscription.name, names)
+		self.assertNotIn(other_customer_subscription.name, names)
+
 
 def make_item_for_si(item_code, properties=None):
 	from erpnext.stock.doctype.item.test_item import make_item
