@@ -717,8 +717,12 @@ class SalesInvoice(SellingController):
 		return POSService(self).set_pos_fields(for_validate)
 
 	def refresh_subscription_status(self):
+		subscriptions = {item.subscription for item in self.items if item.get("subscription")}
 		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
+			subscriptions.add(self.subscription)
+
+		for subscription in subscriptions:
+			refresh_subscription_status(subscription)
 
 	@frappe.whitelist()
 	def reset_mode_of_payments(self):

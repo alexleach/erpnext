@@ -3,6 +3,7 @@
 
 import copy
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe import qb
@@ -5539,6 +5540,42 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.is_debit_note = 1
 		si.update_stock = 1
 		self.assertRaises(frappe.ValidationError, si.save)
+
+	def test_refresh_subscription_status_covers_item_level_subscriptions(self):
+		"""On cancel, SalesInvoice.refresh_subscription_status must refresh every unique
+		subscription linked on its items, not just the invoice-level subscription field."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test Item Subscription Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		subscription_1 = create_subscription(plans=[{"plan": "_Test Item Subscription Plan", "qty": 1}])
+		subscription_2 = create_subscription(plans=[{"plan": "_Test Item Subscription Plan", "qty": 1}])
+
+		si = create_sales_invoice(item_code="_Test Non Stock Item", do_not_save=True)
+		si.items[0].subscription = subscription_1.name
+		si.append(
+			"items",
+			{
+				"item_code": "_Test Non Stock Item",
+				"item_name": "_Test Non Stock Item",
+				"qty": 1,
+				"rate": 100,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"subscription": subscription_2.name,
+			},
+		)
+		si.insert()
+		si.submit()
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.cancel()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertEqual(refreshed, {subscription_1.name, subscription_2.name})
 
 
 def make_item_for_si(item_code, properties=None):
