@@ -5613,7 +5613,7 @@ class TestSalesInvoice(ERPNextTestSuite):
 			"name",
 			0,
 			20,
-			{"item_code": "_Test Non Stock Item", "customer": "_Test Customer"},
+			{"item_code": "_Test Non Stock Item", "party": "_Test Customer", "party_type": "Customer"},
 		)
 		names = {row[0] for row in results}
 		self.assertIn(matching_subscription.name, names)

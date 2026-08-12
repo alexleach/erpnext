@@ -1118,8 +1118,9 @@ def get_subscriptions_for_item(
 		return []
 
 	conditions = [["name", "in", subscription_names]]
-	if customer := filters.get("customer"):
-		conditions += [["party_type", "=", "Customer"], ["party", "=", customer]]
+	party, party_type = filters.get("party"), filters.get("party_type")
+	if party and party_type:
+		conditions += [["party_type", "=", party_type], ["party", "=", party]]
 	if txt:
 		conditions.append([searchfield, "like", f"%{txt}%"])
 
@@ -1133,15 +1134,19 @@ def get_subscriptions_for_item(
 	)
 
 
-def validate_subscription_item(subscription: str, item_code: str, customer: str | None = None) -> None:
+def validate_subscription_item(
+	subscription: str, item_code: str, party: str | None = None, party_type: str | None = None
+) -> None:
 	"""Raise if the subscription has no plan whose item matches item_code, or if it
-	does not belong to the given customer."""
-	if customer:
-		party_type, party = frappe.db.get_value("Subscription", subscription, ["party_type", "party"])
-		if party_type != "Customer" or party != customer:
+	does not belong to the given party."""
+	if party and party_type:
+		subscription_party_type, subscription_party = frappe.db.get_value(
+			"Subscription", subscription, ["party_type", "party"]
+		)
+		if subscription_party_type != party_type or subscription_party != party:
 			frappe.throw(
-				_("Subscription {0} does not belong to Customer {1}.").format(
-					frappe.bold(subscription), frappe.bold(customer)
+				_("Subscription {0} does not belong to {1} {2}.").format(
+					frappe.bold(subscription), party_type, frappe.bold(party)
 				),
 				title=_("Subscription Mismatch"),
 			)

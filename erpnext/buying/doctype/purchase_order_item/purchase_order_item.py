@@ -98,11 +98,11 @@ class PurchaseOrderItem(Document):
 		wip_composite_asset: DF.Link | None
 	# end: auto-generated types
 
-	def validate(self) -> None:
+	def validate_subscription(self, supplier: str) -> None:
 		if self.subscription and self.item_code:
 			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_item
 
-			validate_subscription_item(self.subscription, self.item_code)
+			validate_subscription_item(self.subscription, self.item_code, supplier, "Supplier")
 
 
 def on_doctype_update():

@@ -25,7 +25,11 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 		this.frm.set_query("subscription", "items", function (doc, cdt, cdn) {
 			return {
 				query: "erpnext.accounts.doctype.subscription.subscription.get_subscriptions_for_item",
-				filters: { item_code: locals[cdt][cdn].item_code, customer: doc.customer },
+				filters: {
+					item_code: locals[cdt][cdn].item_code,
+					party: doc.customer,
+					party_type: "Customer",
+				},
 			};
 		});
 	}

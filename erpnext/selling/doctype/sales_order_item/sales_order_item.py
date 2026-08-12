@@ -105,11 +105,11 @@ class SalesOrderItem(Document):
 		work_order_qty: DF.Float
 	# end: auto-generated types
 
-	def validate(self) -> None:
+	def validate_subscription(self, customer: str) -> None:
 		if self.subscription and self.item_code:
 			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_item
 
-			validate_subscription_item(self.subscription, self.item_code)
+			validate_subscription_item(self.subscription, self.item_code, customer, "Customer")
 
 
 def on_doctype_update():

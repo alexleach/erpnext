@@ -3296,6 +3296,29 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		party_link.delete()
 
+	def test_item_subscription_must_belong_to_invoice_supplier(self):
+		"""An item's subscription must belong to the invoice's supplier, even if the
+		subscription has a plan matching the item's item_code."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI Cross Supplier Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		other_supplier_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier 1",
+			plans=[{"plan": "_Test PI Cross Supplier Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			item_code="_Test Non Stock Item",
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.items[0].subscription = other_supplier_subscription.name
+		self.assertRaises(frappe.ValidationError, pi.insert)
+
 
 def set_advance_flag(company, flag, default_account):
 	frappe.db.set_value(

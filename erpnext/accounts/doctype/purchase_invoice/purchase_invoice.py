@@ -305,9 +305,14 @@ class PurchaseInvoice(BuyingController):
 		self.reset_default_field_value("set_from_warehouse", "items", "from_warehouse")
 		PurchaseTaxWithholding(self).on_validate()
 		self.set_percentage_received()
+		self.validate_item_subscriptions()
 
 		if self.on_hold:
 			self.validate_invoice_hold()
+
+	def validate_item_subscriptions(self):
+		for item in self.items:
+			item.validate_subscription(self.supplier)
 
 	def set_percentage_received(self):
 		total_billed_qty = 0.0
