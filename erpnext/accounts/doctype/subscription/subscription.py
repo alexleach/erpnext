@@ -1071,6 +1071,8 @@ def get_linked_item_docs(subscription_name: str) -> dict:
 	parent field is set directly.  The open_count mirrors ERPNext's notification_config
 	filters so the open-notification badge remains semantically correct.
 	"""
+	frappe.has_permission("Subscription", "read", doc=subscription_name, throw=True)
+
 	child_to_parent = {
 		"Purchase Order Item": "Purchase Order",
 		"Purchase Invoice Item": "Purchase Invoice",
@@ -1106,12 +1108,20 @@ def get_linked_item_docs(subscription_name: str) -> dict:
 				.where(child_t.subscription == subscription_name)
 			).run(pluck="parent")
 		)
-		names = sorted(via_parent | via_child)
+		all_names = via_parent | via_child
+
+		# Re-fetch through the permission-checked API so names/counts only ever
+		# reflect documents the caller can actually read.
+		names = (
+			sorted(frappe.get_list(parent_doctype, filters={"name": ["in", list(all_names)]}, pluck="name"))
+			if all_names
+			else []
+		)
 
 		open_count = 0
 		if names and parent_doctype in link_filters:
 			open_filters = {"name": ["in", names], **link_filters[parent_doctype]}
-			open_count = len(frappe.get_all(parent_doctype, filters=open_filters, limit=len(names) + 1))
+			open_count = len(frappe.get_list(parent_doctype, filters=open_filters, limit=len(names) + 1))
 
 		result[parent_doctype] = {"count": len(names), "open_count": open_count, "names": names}
 	return result
@@ -1127,6 +1137,8 @@ def get_subscriptions_for_item(
 	Restricts the list to subscriptions that contain a plan whose item matches
 	the current row's item_code, preventing mismatched subscription/item links.
 	"""
+	frappe.has_permission("Subscription", "read", throw=True)
+
 	item_code = filters.get("item_code")
 	if not item_code:
 		return []
@@ -1151,7 +1163,7 @@ def get_subscriptions_for_item(
 	if txt:
 		conditions.append([searchfield, "like", f"%{txt}%"])
 
-	return frappe.get_all(
+	return frappe.get_list(
 		"Subscription",
 		filters=conditions,
 		fields=["name"],

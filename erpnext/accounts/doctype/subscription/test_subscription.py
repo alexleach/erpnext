@@ -686,6 +686,40 @@ class TestSubscription(ERPNextTestSuite):
 		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))
 		self.assertEqual(getdate(subscription.current_invoice_end), getdate("2026-01-31"))
 
+	def test_get_linked_item_docs_requires_subscription_read_permission(self):
+		"""A whitelisted endpoint must not let any logged-in user enumerate
+		subscriptions/linked documents regardless of their own read permissions."""
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.accounts.doctype.subscription.subscription import get_linked_item_docs
+
+		subscription = create_subscription()
+		unprivileged_user = create_user("test_subscription_no_access@example.com", "Employee")
+
+		with self.set_user(unprivileged_user.name):
+			self.assertRaises(frappe.PermissionError, get_linked_item_docs, subscription.name)
+
+	def test_get_subscriptions_for_item_requires_subscription_read_permission(self):
+		"""Same endpoint-level permission gap as above, for the item link-field query."""
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.accounts.doctype.subscription.subscription import get_subscriptions_for_item
+
+		create_plan(plan_name="_Test Perm Check Plan", item="_Test Non Stock Item", cost=100, currency="INR")
+		unprivileged_user = create_user("test_subscription_no_access@example.com", "Employee")
+
+		with self.set_user(unprivileged_user.name):
+			self.assertRaises(
+				frappe.PermissionError,
+				get_subscriptions_for_item,
+				"Subscription",
+				"",
+				"name",
+				0,
+				20,
+				{"item_code": "_Test Non Stock Item"},
+			)
+
 	def test_process_all_logs_error_when_first_subscription_fails(self):
 		sub1 = create_subscription(start_date="2018-01-01")
 		sub2 = create_subscription(start_date="2018-01-02")
