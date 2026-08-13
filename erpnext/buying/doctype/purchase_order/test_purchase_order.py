@@ -1766,6 +1766,24 @@ class TestPurchaseOrder(ERPNextTestSuite):
 		po.items[0].subscription = other_supplier_subscription.name
 		self.assertRaises(frappe.ValidationError, po.insert)
 
+	def test_parent_subscription_must_belong_to_order_supplier(self):
+		"""The order's own subscription field must belong to the order's
+		supplier, not just each item's subscription."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PO Parent Cross Supplier Plan", item="_Test Item", cost=100, currency="INR"
+		)
+		other_supplier_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier 1",
+			plans=[{"plan": "_Test PO Parent Cross Supplier Plan", "qty": 1}],
+		)
+
+		po = create_purchase_order(supplier="_Test Supplier", do_not_save=True)
+		po.subscription = other_supplier_subscription.name
+		self.assertRaises(frappe.ValidationError, po.insert)
+
 
 def create_po_for_sc_testing():
 	from erpnext.controllers.tests.test_subcontracting_controller import (

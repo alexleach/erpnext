@@ -331,6 +331,11 @@ class SalesOrder(SellingController):
 			d.projected_qty = bin_data.get((d.item_code, d.warehouse), 0.0)
 
 	def validate_item_subscriptions(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.customer, "Customer")
+
 		for item in self.items:
 			item.validate_subscription(self.customer)
 

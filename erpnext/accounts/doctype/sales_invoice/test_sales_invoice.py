@@ -5595,6 +5595,25 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.items[0].subscription = other_customer_subscription.name
 		self.assertRaises(frappe.ValidationError, si.insert)
 
+	def test_parent_subscription_must_belong_to_invoice_customer(self):
+		"""The invoice's own subscription field must belong to the invoice's
+		customer, not just each item's subscription."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test SI Parent Cross Customer Plan",
+			item="_Test Non Stock Item",
+			cost=100,
+			currency="INR",
+		)
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test SI Parent Cross Customer Plan", "qty": 1}]
+		)
+
+		si = create_sales_invoice(customer="_Test Customer", do_not_save=True)
+		si.subscription = other_customer_subscription.name
+		self.assertRaises(frappe.ValidationError, si.insert)
+
 	def test_get_subscriptions_for_item_filters_by_customer(self):
 		from erpnext.accounts.doctype.subscription.subscription import get_subscriptions_for_item
 		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
