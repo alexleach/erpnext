@@ -142,6 +142,8 @@ frappe.ui.form.on("Subscription", {
 
 			if (data.count > 0) {
 				$link.find(".count").text(data.count).removeClass("hidden");
+			} else {
+				$link.find(".count").text("").addClass("hidden");
 			}
 
 			// open_count mirrors ERPNext's notification_config filters applied to the
@@ -149,18 +151,19 @@ frappe.ui.form.on("Subscription", {
 			if (data.open_count > 0) {
 				$link.find(".open-notification").text(data.open_count).removeClass("hidden");
 			} else {
-				$link.find(".open-notification").addClass("hidden");
+				$link.find(".open-notification").text("").addClass("hidden");
 			}
 
+			// Always clear any handler from a previously viewed Subscription first, so a
+			// Subscription with no linked documents can't fire a stale click handler that
+			// still closes over the previous document's `data.names`.
+			const $clickable = $link.find(".badge-link, .count, .open-notification").off("click");
 			if (data.names && data.names.length) {
 				// Replace Frappe's default handler on all three interactive elements.
-				$link
-					.find(".badge-link, .count, .open-notification")
-					.off("click")
-					.on("click", function () {
-						frappe.route_options = { name: ["in", data.names] };
-						frappe.set_route("List", doctype, "List");
-					});
+				$clickable.on("click", function () {
+					frappe.route_options = { name: ["in", data.names] };
+					frappe.set_route("List", doctype, "List");
+				});
 			}
 		});
 	},
