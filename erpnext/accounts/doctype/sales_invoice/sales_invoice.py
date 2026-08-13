@@ -722,12 +722,25 @@ class SalesInvoice(SellingController):
 		return POSService(self).set_pos_fields(for_validate)
 
 	def refresh_subscription_status(self):
-		subscriptions = {item.subscription for item in self.items if item.get("subscription")}
-		if self.get("subscription"):
-			subscriptions.add(self.subscription)
+		subscriptions = self._get_subscription_names(self)
+
+		# Both subscription fields are allow_on_submit, so an already-submitted
+		# invoice's links can change without going through submit/cancel. Refresh
+		# whatever was linked before the edit too, so a removed/replaced link still
+		# gets its old subscription's status brought up to date.
+		doc_before_save = self.get_doc_before_save()
+		if doc_before_save:
+			subscriptions |= self._get_subscription_names(doc_before_save)
 
 		for subscription in subscriptions:
 			refresh_subscription_status(subscription)
+
+	@staticmethod
+	def _get_subscription_names(doc) -> set[str]:
+		subscriptions = {item.subscription for item in doc.get("items", []) if item.get("subscription")}
+		if doc.get("subscription"):
+			subscriptions.add(doc.subscription)
+		return subscriptions
 
 	@frappe.whitelist()
 	def reset_mode_of_payments(self):
@@ -1187,6 +1200,8 @@ class SalesInvoice(SellingController):
 		if self.needs_repost:
 			self.validate_for_repost()
 			self.repost_accounting_entries()
+
+		self.refresh_subscription_status()
 
 	def set_status(self, update=False, status=None, update_modified=True):
 		StatusService(self).set_status(update, status, update_modified)

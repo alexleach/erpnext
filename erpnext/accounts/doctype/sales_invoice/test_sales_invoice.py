@@ -5619,6 +5619,34 @@ class TestSalesInvoice(ERPNextTestSuite):
 		self.assertIn(matching_subscription.name, names)
 		self.assertNotIn(other_customer_subscription.name, names)
 
+	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
+		"""subscription fields are allow_on_submit, so changing an item's linked
+		subscription after submit must still refresh both the subscription it was
+		unlinked from and the one it was newly linked to."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test Update After Submit Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		old_subscription = create_subscription(plans=[{"plan": "_Test Update After Submit Plan", "qty": 1}])
+		new_subscription = create_subscription(plans=[{"plan": "_Test Update After Submit Plan", "qty": 1}])
+
+		si = create_sales_invoice(item_code="_Test Non Stock Item", do_not_save=True)
+		si.items[0].subscription = old_subscription.name
+		si.insert()
+		si.submit()
+
+		si.reload()
+		si.items[0].subscription = new_subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.save()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
+
 
 def make_item_for_si(item_code, properties=None):
 	from erpnext.stock.doctype.item.test_item import make_item
