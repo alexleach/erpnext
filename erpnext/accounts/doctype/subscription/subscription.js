@@ -113,10 +113,22 @@ frappe.ui.form.on("Subscription", {
 	fetch_subscription_linked: function (frm) {
 		frm._subscription_linked = null;
 		frm._subscription_dashboard_ready = false;
+
+		// A later refresh (or navigation to a different document) can start before an
+		// earlier request resolves. Only the latest request for the current document
+		// is allowed to apply its result, so a slow, stale response can't clobber it.
+		const request_id = (frm._subscription_linked_request_id || 0) + 1;
+		frm._subscription_linked_request_id = request_id;
+		const subscription_name = frm.doc.name;
+
 		frappe.call({
 			method: "erpnext.accounts.doctype.subscription.subscription.get_linked_item_docs",
-			args: { subscription_name: frm.doc.name },
+			args: { subscription_name },
 			callback(r) {
+				const is_latest_request = request_id === frm._subscription_linked_request_id;
+				const is_same_document = frm.doc.name === subscription_name;
+				if (!is_latest_request || !is_same_document) return;
+
 				if (!r.message) return;
 				frm._subscription_linked = r.message;
 				frm.trigger("apply_subscription_counts");
