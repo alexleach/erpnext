@@ -300,13 +300,28 @@ class Subscription(Document):
 		elif not self.has_outstanding_invoice():
 			self.status = STATUS_ACTIVE
 
+	def _linked_invoice_names(self) -> set[str]:
+		"""Names of invoices linked to this subscription, either via the parent
+		`subscription` field or via any child item's `subscription` field."""
+		parent_doctype = self.invoice_document_type
+		via_parent = frappe.get_all(parent_doctype, filters={"subscription": self.name}, pluck="name")
+		via_item = frappe.get_all(
+			f"{parent_doctype} Item", filters={"subscription": self.name}, pluck="parent", distinct=True
+		)
+		return set(via_parent) | set(via_item)
+
 	def _set_current_invoice_dates(self) -> None:
-		invoice = frappe.get_all(
-			self.invoice_document_type,
-			filters={"subscription": self.name, "docstatus": ("<", 2), "is_return": 0},
-			fields=["from_date", "to_date"],
-			order_by="to_date desc",
-			limit=1,
+		names = self._linked_invoice_names()
+		invoice = (
+			frappe.get_all(
+				self.invoice_document_type,
+				filters={"name": ["in", names], "docstatus": ("<", 2), "is_return": 0},
+				fields=["from_date", "to_date"],
+				order_by="to_date desc",
+				limit=1,
+			)
+			if names
+			else []
 		)
 		self.current_invoice_start = invoice[0].from_date if invoice else None
 		self.current_invoice_end = invoice[0].to_date if invoice else None
@@ -734,9 +749,13 @@ class Subscription(Document):
 		"""
 		Returns the most recent generated invoice.
 		"""
+		names = self._linked_invoice_names()
+		if not names:
+			return None
+
 		invoice = frappe.get_all(
 			self.invoice_document_type,
-			{"subscription": self.name, "docstatus": ("<", 2), "is_return": 0},
+			{"name": ["in", names], "docstatus": ("<", 2), "is_return": 0},
 			limit=1,
 			order_by="to_date desc",
 			pluck="name",
@@ -764,10 +783,14 @@ class Subscription(Document):
 		"""
 		Returns the count of submitted, non-return invoices that are not yet paid.
 		"""
+		names = self._linked_invoice_names()
+		if not names:
+			return 0
+
 		return frappe.db.count(
 			self.invoice_document_type,
 			{
-				"subscription": self.name,
+				"name": ["in", names],
 				"docstatus": 1,
 				"is_return": 0,
 				"status": ["!=", INVOICE_PAID],
@@ -779,10 +802,14 @@ class Subscription(Document):
 		`True` only when every submitted, not-`Paid` invoice on the subscription has
 		credit notes whose absolute total covers its outstanding amount.
 		"""
+		names = self._linked_invoice_names()
+		if not names:
+			return False
+
 		unpaid_invoices = frappe.get_all(
 			self.invoice_document_type,
 			filters={
-				"subscription": self.name,
+				"name": ["in", names],
 				"docstatus": 1,
 				"is_return": 0,
 				"status": ["!=", INVOICE_PAID],

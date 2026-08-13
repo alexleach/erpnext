@@ -653,6 +653,39 @@ class TestSubscription(ERPNextTestSuite):
 		except TypeError as e:
 			self.fail(f"validate_end_date crashed with no plans: {e}")
 
+	def test_lifecycle_methods_include_item_only_linked_invoices(self):
+		"""has_outstanding_invoice/get_current_invoice/is_fully_refunded/
+		_set_current_invoice_dates must see invoices linked only through a child
+		item's subscription field, not just the parent subscription field --
+		otherwise process() can ignore an outstanding invoice and duplicate-bill."""
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		create_plan(plan_name="_Test Item Link Plan", item="_Test Non Stock Item", cost=100, currency="INR")
+		subscription = create_subscription(plans=[{"plan": "_Test Item Link Plan", "qty": 1}])
+
+		si = create_sales_invoice(
+			item_code="_Test Non Stock Item", customer=subscription.party, do_not_save=True
+		)
+		si.items[0].subscription = subscription.name
+		# from_date/to_date are ordinary fields nothing else populates on a manually
+		# built invoice; set them explicitly so the date-picking assertion below is
+		# meaningful rather than trivially None == None.
+		si.from_date = "2026-01-01"
+		si.to_date = "2026-01-31"
+		si.insert()
+		si.submit()
+
+		self.assertEqual(subscription.has_outstanding_invoice(), 1)
+		self.assertFalse(subscription.is_fully_refunded())
+
+		current = subscription.get_current_invoice()
+		self.assertIsNotNone(current)
+		self.assertEqual(current.name, si.name)
+
+		subscription._set_current_invoice_dates()
+		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))
+		self.assertEqual(getdate(subscription.current_invoice_end), getdate("2026-01-31"))
+
 	def test_process_all_logs_error_when_first_subscription_fails(self):
 		sub1 = create_subscription(start_date="2018-01-01")
 		sub2 = create_subscription(start_date="2018-01-02")
