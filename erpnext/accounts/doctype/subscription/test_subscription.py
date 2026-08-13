@@ -657,7 +657,11 @@ class TestSubscription(ERPNextTestSuite):
 		"""has_outstanding_invoice/get_current_invoice/is_fully_refunded/
 		_set_current_invoice_dates must see invoices linked only through a child
 		item's subscription field, not just the parent subscription field --
-		otherwise process() can ignore an outstanding invoice and duplicate-bill."""
+		otherwise process() can ignore an outstanding invoice and duplicate-bill.
+
+		_set_current_invoice_dates must also derive the period from the matching
+		item's own dates rather than the invoice-level from_date/to_date, which on
+		a multi-subscription invoice can belong to a different subscription."""
 		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 
 		create_plan(plan_name="_Test Item Link Plan", item="_Test Non Stock Item", cost=100, currency="INR")
@@ -667,11 +671,12 @@ class TestSubscription(ERPNextTestSuite):
 			item_code="_Test Non Stock Item", customer=subscription.party, do_not_save=True
 		)
 		si.items[0].subscription = subscription.name
-		# from_date/to_date are ordinary fields nothing else populates on a manually
-		# built invoice; set them explicitly so the date-picking assertion below is
-		# meaningful rather than trivially None == None.
-		si.from_date = "2026-01-01"
-		si.to_date = "2026-01-31"
+		si.items[0].subscription_start_date = "2026-01-01"
+		si.items[0].subscription_end_date = "2026-01-31"
+		# Invoice-level dates deliberately differ from the item's, standing in for a
+		# multi-subscription invoice where these belong to a different subscription.
+		si.from_date = "2026-03-01"
+		si.to_date = "2026-03-31"
 		si.insert()
 		si.submit()
 

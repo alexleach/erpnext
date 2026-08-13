@@ -311,20 +311,52 @@ class Subscription(Document):
 		return set(via_parent) | set(via_item)
 
 	def _set_current_invoice_dates(self) -> None:
-		names = self._linked_invoice_names()
-		invoice = (
-			frappe.get_all(
-				self.invoice_document_type,
-				filters={"name": ["in", names], "docstatus": ("<", 2), "is_return": 0},
-				fields=["from_date", "to_date"],
-				order_by="to_date desc",
-				limit=1,
-			)
-			if names
-			else []
+		parent_doctype = self.invoice_document_type
+
+		# Parent-linked invoices: the invoice-level from_date/to_date genuinely
+		# describe this subscription's period.
+		parent_invoices = frappe.get_all(
+			parent_doctype,
+			filters={"subscription": self.name, "docstatus": ("<", 2), "is_return": 0},
+			fields=["name", "from_date", "to_date"],
 		)
-		self.current_invoice_start = invoice[0].from_date if invoice else None
-		self.current_invoice_end = invoice[0].to_date if invoice else None
+		periods = [
+			{"period_start": inv.from_date, "period_end": inv.to_date}
+			for inv in parent_invoices
+			if inv.from_date and inv.to_date
+		]
+
+		# Item-only-linked invoices: on a multi-subscription invoice the invoice-level
+		# from_date/to_date may belong to a different subscription, so derive the
+		# period from this subscription's own item rows instead (same aggregation
+		# _item_billing_periods uses for the heatmap).
+		parent_names = {inv.name for inv in parent_invoices}
+		aggregated = self._aggregate_item_periods(parent_doctype, parent_names)
+		if aggregated:
+			valid_names = set(
+				frappe.get_all(
+					parent_doctype,
+					filters={
+						"name": ["in", list(aggregated.keys())],
+						"docstatus": ("<", 2),
+						"is_return": 0,
+					},
+					pluck="name",
+				)
+			)
+			periods += [
+				{"period_start": period["period_start"], "period_end": period["period_end"]}
+				for name, period in aggregated.items()
+				if name in valid_names
+			]
+
+		if periods:
+			latest = max(periods, key=lambda p: getdate(p["period_end"]))
+			self.current_invoice_start = latest["period_start"]
+			self.current_invoice_end = latest["period_end"]
+		else:
+			self.current_invoice_start = None
+			self.current_invoice_end = None
 
 	def is_trialling(self) -> bool:
 		"""
@@ -959,16 +991,20 @@ class Subscription(Document):
 
 		return [*periods, *self._planned_periods(periods)]
 
-	def _item_billing_periods(self, parent_doctype: str, exclude_names: set) -> list[dict]:
-		"""Billing periods sourced from child-table line items for multi-subscription invoices."""
+	def _aggregate_item_periods(self, parent_doctype: str, exclude_names: set) -> dict[str, dict]:
+		"""Aggregate this subscription's item-level date/amount span per invoice, for
+		invoices found via the child-table `subscription` field only.
+
+		span = min(start)..max(end), amount = sum of matching items. Invoices already
+		covered by `exclude_names` (parent-linked) and items without a date range are
+		skipped -- the latter cannot be plotted on the heatmap or trusted for dates.
+		"""
 		items = frappe.get_all(
 			f"{parent_doctype} Item",
 			filters={"subscription": self.name},
 			fields=["parent", "subscription_start_date", "subscription_end_date", "amount"],
 		)
 
-		# Aggregate per invoice: span = min(start)..max(end), amount = sum of matching items.
-		# Skip items without date ranges — they cannot be plotted on the heatmap.
 		aggregated: dict[str, dict] = {}
 		for item in items:
 			if item.parent in exclude_names:
@@ -988,6 +1024,11 @@ class Subscription(Document):
 				agg["period_end"] = max(agg["period_end"], end)
 				agg["amount"] += flt(item.amount)
 
+		return aggregated
+
+	def _item_billing_periods(self, parent_doctype: str, exclude_names: set) -> list[dict]:
+		"""Billing periods sourced from child-table line items for multi-subscription invoices."""
+		aggregated = self._aggregate_item_periods(parent_doctype, exclude_names)
 		if not aggregated:
 			return []
 
