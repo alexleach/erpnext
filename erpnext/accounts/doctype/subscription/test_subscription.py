@@ -654,7 +654,7 @@ class TestSubscription(ERPNextTestSuite):
 			self.fail(f"validate_end_date crashed with no plans: {e}")
 
 	def test_lifecycle_methods_include_item_only_linked_invoices(self):
-		"""has_outstanding_invoice/get_current_invoice/is_fully_refunded/
+		"""has_outstanding_invoice/get_current_invoice/is_fully_refunded/invoices/
 		_set_current_invoice_dates must see invoices linked only through a child
 		item's subscription field, not just the parent subscription field --
 		otherwise process() can ignore an outstanding invoice and duplicate-bill.
@@ -686,6 +686,9 @@ class TestSubscription(ERPNextTestSuite):
 		current = subscription.get_current_invoice()
 		self.assertIsNotNone(current)
 		self.assertEqual(current.name, si.name)
+
+		invoice_names = {invoice.name for invoice in subscription.invoices}
+		self.assertEqual(invoice_names, {si.name})
 
 		subscription._set_current_invoice_dates()
 		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))

@@ -3319,7 +3319,7 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 			do_not_save=True,
 		)
 		pi.items[0].subscription = other_supplier_subscription.name
-		self.assertRaises(frappe.ValidationError, pi.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", pi.insert)
 
 	def test_parent_subscription_must_belong_to_invoice_supplier(self):
 		"""The invoice's own subscription field must belong to the invoice's
@@ -3344,7 +3344,7 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 			do_not_save=True,
 		)
 		pi.subscription = other_supplier_subscription.name
-		self.assertRaises(frappe.ValidationError, pi.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", pi.insert)
 
 	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
 		"""subscription fields are allow_on_submit, so changing an item's linked

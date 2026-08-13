@@ -5593,7 +5593,7 @@ class TestSalesInvoice(ERPNextTestSuite):
 			item_code="_Test Non Stock Item", customer="_Test Customer", do_not_save=True
 		)
 		si.items[0].subscription = other_customer_subscription.name
-		self.assertRaises(frappe.ValidationError, si.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
 
 	def test_parent_subscription_must_belong_to_invoice_customer(self):
 		"""The invoice's own subscription field must belong to the invoice's
@@ -5612,7 +5612,7 @@ class TestSalesInvoice(ERPNextTestSuite):
 
 		si = create_sales_invoice(customer="_Test Customer", do_not_save=True)
 		si.subscription = other_customer_subscription.name
-		self.assertRaises(frappe.ValidationError, si.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
 
 	def test_get_subscriptions_for_item_filters_by_customer(self):
 		from erpnext.accounts.doctype.subscription.subscription import get_subscriptions_for_item

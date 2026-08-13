@@ -1764,7 +1764,7 @@ class TestPurchaseOrder(ERPNextTestSuite):
 
 		po = create_purchase_order(supplier="_Test Supplier", do_not_save=True)
 		po.items[0].subscription = other_supplier_subscription.name
-		self.assertRaises(frappe.ValidationError, po.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", po.insert)
 
 	def test_parent_subscription_must_belong_to_order_supplier(self):
 		"""The order's own subscription field must belong to the order's
@@ -1782,7 +1782,7 @@ class TestPurchaseOrder(ERPNextTestSuite):
 
 		po = create_purchase_order(supplier="_Test Supplier", do_not_save=True)
 		po.subscription = other_supplier_subscription.name
-		self.assertRaises(frappe.ValidationError, po.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", po.insert)
 
 
 def create_po_for_sc_testing():

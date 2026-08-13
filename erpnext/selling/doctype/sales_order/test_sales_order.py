@@ -3423,7 +3423,7 @@ class TestSalesOrder(ERPNextTestSuite):
 
 		so = make_sales_order(customer="_Test Customer", do_not_save=True)
 		so.items[0].subscription = other_customer_subscription.name
-		self.assertRaises(frappe.ValidationError, so.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", so.insert)
 
 	def test_parent_subscription_must_belong_to_order_customer(self):
 		"""The order's own subscription field must belong to the order's
@@ -3439,7 +3439,7 @@ class TestSalesOrder(ERPNextTestSuite):
 
 		so = make_sales_order(customer="_Test Customer", do_not_save=True)
 		so.subscription = other_customer_subscription.name
-		self.assertRaises(frappe.ValidationError, so.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", so.insert)
 
 
 def compare_payment_schedules(doc, doc1, doc2):

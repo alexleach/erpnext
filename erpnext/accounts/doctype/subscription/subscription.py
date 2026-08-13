@@ -7,6 +7,7 @@ from datetime import date
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils.caching import request_cache
 from frappe.utils.data import (
 	add_days,
 	add_months,
@@ -798,9 +799,12 @@ class Subscription(Document):
 
 	@property
 	def invoices(self) -> list[dict]:
+		names = self._linked_invoice_names()
+		if not names:
+			return []
 		return frappe.get_all(
 			self.invoice_document_type,
-			filters={"subscription": self.name},
+			filters={"name": ["in", names]},
 			order_by="from_date asc",
 		)
 
@@ -1214,6 +1218,16 @@ def get_subscriptions_for_item(
 	)
 
 
+def get_document_subscription_names(doc) -> set[str]:
+	"""Subscriptions referenced by this document, either on its own `subscription`
+	field or on any child item's `subscription` field. Shared by SalesInvoice and
+	PurchaseInvoice's refresh_subscription_status."""
+	subscriptions = {item.subscription for item in doc.get("items", []) if item.get("subscription")}
+	if doc.get("subscription"):
+		subscriptions.add(doc.subscription)
+	return subscriptions
+
+
 def validate_subscription_party(subscription: str, party: str, party_type: str) -> None:
 	"""Raise if the subscription does not belong to the given party."""
 	subscription_party_type, subscription_party = frappe.db.get_value(
@@ -1228,6 +1242,23 @@ def validate_subscription_party(subscription: str, party: str, party_type: str) 
 		)
 
 
+@request_cache
+def _get_subscription_plan_items(subscription: str) -> list[str]:
+	"""Items belonging to any plan on this subscription, via a single joined
+	query. Cached per request so a document with many item rows referencing
+	the same subscription doesn't re-run this for every row.
+	"""
+	plan_detail = frappe.qb.DocType("Subscription Plan Detail")
+	plan = frappe.qb.DocType("Subscription Plan")
+	return (
+		frappe.qb.from_(plan_detail)
+		.join(plan)
+		.on(plan_detail.plan == plan.name)
+		.select(plan.item)
+		.where(plan_detail.parent == subscription)
+	).run(pluck=True)
+
+
 def validate_subscription_item(
 	subscription: str, item_code: str, party: str | None = None, party_type: str | None = None
 ) -> None:
@@ -1236,17 +1267,7 @@ def validate_subscription_item(
 	if party and party_type:
 		validate_subscription_party(subscription, party, party_type)
 
-	plan_items = frappe.get_all(
-		"Subscription Plan",
-		filters={
-			"name": [
-				"in",
-				frappe.get_all("Subscription Plan Detail", filters={"parent": subscription}, pluck="plan"),
-			]
-		},
-		pluck="item",
-	)
-	if item_code not in plan_items:
+	if item_code not in _get_subscription_plan_items(subscription):
 		frappe.throw(
 			_("Item {0} is not in any plan belonging to Subscription {1}.").format(
 				frappe.bold(item_code), frappe.bold(subscription)
