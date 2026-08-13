@@ -311,6 +311,11 @@ class PurchaseInvoice(BuyingController):
 			self.validate_invoice_hold()
 
 	def validate_item_subscriptions(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.supplier, "Supplier")
+
 		for item in self.items:
 			item.validate_subscription(self.supplier)
 

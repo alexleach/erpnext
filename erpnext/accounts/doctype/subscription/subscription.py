@@ -1214,22 +1214,27 @@ def get_subscriptions_for_item(
 	)
 
 
+def validate_subscription_party(subscription: str, party: str, party_type: str) -> None:
+	"""Raise if the subscription does not belong to the given party."""
+	subscription_party_type, subscription_party = frappe.db.get_value(
+		"Subscription", subscription, ["party_type", "party"]
+	) or (None, None)
+	if subscription_party_type != party_type or subscription_party != party:
+		frappe.throw(
+			_("Subscription {0} does not belong to {1} {2}.").format(
+				frappe.bold(subscription), party_type, frappe.bold(party)
+			),
+			title=_("Subscription Mismatch"),
+		)
+
+
 def validate_subscription_item(
 	subscription: str, item_code: str, party: str | None = None, party_type: str | None = None
 ) -> None:
 	"""Raise if the subscription has no plan whose item matches item_code, or if it
 	does not belong to the given party."""
 	if party and party_type:
-		subscription_party_type, subscription_party = frappe.db.get_value(
-			"Subscription", subscription, ["party_type", "party"]
-		) or (None, None)
-		if subscription_party_type != party_type or subscription_party != party:
-			frappe.throw(
-				_("Subscription {0} does not belong to {1} {2}.").format(
-					frappe.bold(subscription), party_type, frappe.bold(party)
-				),
-				title=_("Subscription Mismatch"),
-			)
+		validate_subscription_party(subscription, party, party_type)
 
 	plan_items = frappe.get_all(
 		"Subscription Plan",

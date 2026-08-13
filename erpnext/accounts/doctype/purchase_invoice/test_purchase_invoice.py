@@ -3321,6 +3321,31 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		pi.items[0].subscription = other_supplier_subscription.name
 		self.assertRaises(frappe.ValidationError, pi.insert)
 
+	def test_parent_subscription_must_belong_to_invoice_supplier(self):
+		"""The invoice's own subscription field must belong to the invoice's
+		supplier, not just each item's subscription."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI Parent Cross Supplier Plan",
+			item="_Test Non Stock Item",
+			cost=100,
+			currency="INR",
+		)
+		other_supplier_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier 1",
+			plans=[{"plan": "_Test PI Parent Cross Supplier Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.subscription = other_supplier_subscription.name
+		self.assertRaises(frappe.ValidationError, pi.insert)
+
 	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
 		"""subscription fields are allow_on_submit, so changing an item's linked
 		subscription after submit must still refresh both the subscription it was
