@@ -1222,7 +1222,7 @@ def validate_subscription_item(
 	if party and party_type:
 		subscription_party_type, subscription_party = frappe.db.get_value(
 			"Subscription", subscription, ["party_type", "party"]
-		)
+		) or (None, None)
 		if subscription_party_type != party_type or subscription_party != party:
 			frappe.throw(
 				_("Subscription {0} does not belong to {1} {2}.").format(
