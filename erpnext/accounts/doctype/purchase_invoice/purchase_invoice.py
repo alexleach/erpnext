@@ -679,9 +679,28 @@ class PurchaseInvoice(BuyingController):
 			self.validate_for_repost()
 			self.repost_accounting_entries()
 
+		self.refresh_subscription_status()
+
 	def refresh_subscription_status(self):
-		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
+		subscriptions = self._get_subscription_names(self)
+
+		# Both subscription fields are allow_on_submit, so an already-submitted
+		# invoice's links can change without going through submit/cancel. Refresh
+		# whatever was linked before the edit too, so a removed/replaced link still
+		# gets its old subscription's status brought up to date.
+		doc_before_save = self.get_doc_before_save()
+		if doc_before_save:
+			subscriptions |= self._get_subscription_names(doc_before_save)
+
+		for subscription in subscriptions:
+			refresh_subscription_status(subscription)
+
+	@staticmethod
+	def _get_subscription_names(doc) -> set[str]:
+		subscriptions = {item.subscription for item in doc.get("items", []) if item.get("subscription")}
+		if doc.get("subscription"):
+			subscriptions.add(doc.subscription)
+		return subscriptions
 
 	def make_gl_entries(self, gl_entries=None, from_repost=False):
 		update_outstanding = "No" if (cint(self.is_paid) or self.write_off_account) else "Yes"
