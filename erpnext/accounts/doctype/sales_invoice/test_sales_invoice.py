@@ -5666,6 +5666,28 @@ class TestSalesInvoice(ERPNextTestSuite):
 		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
 		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
 
+	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
+		"""A standard (non-return) submitted invoice must refresh its linked
+		subscription too, not only on return/cancel."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test SI On Submit Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		subscription = create_subscription(plans=[{"plan": "_Test SI On Submit Plan", "qty": 1}])
+
+		si = create_sales_invoice(item_code="_Test Non Stock Item", do_not_save=True)
+		si.items[0].subscription = subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.insert()
+			si.submit()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertIn(subscription.name, refreshed)
+
 
 def make_item_for_si(item_code, properties=None):
 	from erpnext.stock.doctype.item.test_item import make_item

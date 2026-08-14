@@ -510,8 +510,7 @@ class SalesInvoice(SellingController):
 		self.process_common_party_accounting()
 		self.update_billed_qty_in_scio()
 
-		if self.is_return:
-			self.refresh_subscription_status()
+		self.refresh_subscription_status()
 
 	def before_cancel(self):
 		POSService(self).check_if_created_using_pos_and_pos_closing_entry_generated()
