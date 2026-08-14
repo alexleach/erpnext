@@ -160,6 +160,9 @@ class SalesOrder(SellingController):
 			"Cancelled",
 			"Closed",
 		]
+		subscription: DF.Link | None
+		subscription_end_date: DF.Date | None
+		subscription_start_date: DF.Date | None
 		tax_category: DF.Link | None
 		tax_id: DF.Data | None
 		taxes: DF.Table[SalesTaxesandCharges]
@@ -224,6 +227,7 @@ class SalesOrder(SellingController):
 		self.validate_uom_is_integer("stock_uom", "stock_qty")
 		self.validate_uom_is_integer("uom", "qty")
 		self.validate_for_items()
+		self.validate_item_subscriptions()
 		self.validate_warehouse()
 		self.validate_drop_ship()
 		SalesOrderStockReservation(self).validate_reserved_stock()
@@ -325,6 +329,15 @@ class SalesOrder(SellingController):
 		for d in self.get("items"):
 			d.transaction_date = self.transaction_date
 			d.projected_qty = bin_data.get((d.item_code, d.warehouse), 0.0)
+
+	def validate_item_subscriptions(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.customer, "Customer")
+
+		for item in self.items:
+			item.validate_subscription(self.customer)
 
 	def product_bundle_has_stock_item(self, product_bundle):
 		"""Returns true if the active bundle for `product_bundle` (a parent item code) has a stock item"""

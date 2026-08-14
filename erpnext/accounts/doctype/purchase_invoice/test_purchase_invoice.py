@@ -2,6 +2,8 @@
 # License: GNU General Public License v3. See license.txt
 
 
+from unittest.mock import patch
+
 import frappe
 from frappe.query_builder.functions import Sum
 from frappe.utils import add_days, cint, flt, getdate, nowdate, today
@@ -3295,6 +3297,129 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		self.assertEqual(supplier_row.debit_in_account_currency, 0)
 
 		party_link.delete()
+
+	def test_item_subscription_must_belong_to_invoice_supplier(self):
+		"""An item's subscription must belong to the invoice's supplier, even if the
+		subscription has a plan matching the item's item_code."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI Cross Supplier Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		other_supplier_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier 1",
+			plans=[{"plan": "_Test PI Cross Supplier Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			item_code="_Test Non Stock Item",
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.items[0].subscription = other_supplier_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", pi.insert)
+
+	def test_parent_subscription_must_belong_to_invoice_supplier(self):
+		"""The invoice's own subscription field must belong to the invoice's
+		supplier, not just each item's subscription."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI Parent Cross Supplier Plan",
+			item="_Test Non Stock Item",
+			cost=100,
+			currency="INR",
+		)
+		other_supplier_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier 1",
+			plans=[{"plan": "_Test PI Parent Cross Supplier Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.subscription = other_supplier_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", pi.insert)
+
+	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
+		"""subscription fields are allow_on_submit, so changing an item's linked
+		subscription after submit must still refresh both the subscription it was
+		unlinked from and the one it was newly linked to."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI Update After Submit Plan",
+			item="_Test Non Stock Item",
+			cost=100,
+			currency="INR",
+		)
+		old_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI Update After Submit Plan", "qty": 1}],
+		)
+		new_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI Update After Submit Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			item_code="_Test Non Stock Item",
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.items[0].subscription = old_subscription.name
+		pi.insert()
+		pi.submit()
+
+		pi.reload()
+		pi.items[0].subscription = new_subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.purchase_invoice.purchase_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			pi.save()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
+
+	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
+		"""A standard (non-return) submitted invoice must refresh its linked
+		subscription too, not only on return/cancel."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI On Submit Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI On Submit Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			item_code="_Test Non Stock Item",
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.items[0].subscription = subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.purchase_invoice.purchase_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			pi.insert()
+			pi.submit()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertIn(subscription.name, refreshed)
 
 
 def set_advance_flag(company, flag, default_account):

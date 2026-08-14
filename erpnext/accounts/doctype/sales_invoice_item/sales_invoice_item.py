@@ -58,6 +58,7 @@ class SalesInvoiceItem(Document):
 		incoming_rate: DF.Currency
 		is_fixed_asset: DF.Check
 		is_free_item: DF.Check
+		is_product_bundle: DF.Check
 		item_code: DF.Link | None
 		item_group: DF.Link | None
 		item_name: DF.Data
@@ -76,6 +77,7 @@ class SalesInvoiceItem(Document):
 		pos_invoice_item: DF.Data | None
 		price_list_rate: DF.Currency
 		pricing_rules: DF.SmallText | None
+		product_bundle: DF.Link | None
 		project: DF.Link | None
 		purchase_order: DF.Link | None
 		purchase_order_item: DF.Data | None
@@ -95,6 +97,9 @@ class SalesInvoiceItem(Document):
 		stock_qty: DF.Float
 		stock_uom: DF.Link | None
 		stock_uom_rate: DF.Currency
+		subscription: DF.Link | None
+		subscription_end_date: DF.Date | None
+		subscription_start_date: DF.Date | None
 		target_warehouse: DF.Link | None
 		tax_withholding_category: DF.Link | None
 		total_weight: DF.Float
@@ -104,6 +109,12 @@ class SalesInvoiceItem(Document):
 		weight_per_unit: DF.Float
 		weight_uom: DF.Link | None
 	# end: auto-generated types
+
+	def validate_subscription(self, customer: str) -> None:
+		if self.subscription and self.item_code:
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_item
+
+			validate_subscription_item(self.subscription, self.item_code, customer, "Customer")
 
 	def validate_cost_center(self, company: str):
 		cost_center_company = frappe.get_cached_value("Cost Center", self.cost_center, "company")

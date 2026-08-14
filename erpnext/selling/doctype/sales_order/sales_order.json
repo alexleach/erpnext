@@ -180,6 +180,11 @@
   "party_account_currency",
   "proforma_tab",
   "proforma_html",
+  "subscription_section",
+  "subscription",
+  "column_break_aanf",
+  "subscription_start_date",
+  "subscription_end_date",
   "connections_tab"
  ],
  "fields": [
@@ -1775,6 +1780,35 @@
    "label": "Title",
    "no_copy": 1,
    "print_hide": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription",
+   "fieldtype": "Link",
+   "label": "Subscription",
+   "options": "Subscription"
+  },
+  {
+   "fieldname": "column_break_aanf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_start_date",
+   "fieldtype": "Date",
+   "label": "Subscription Start Date"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_end_date",
+   "fieldtype": "Date",
+   "label": "Subscription End Date"
   }
  ],
  "grid_page_length": 50,

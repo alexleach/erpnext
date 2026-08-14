@@ -21,6 +21,17 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 			Dunning: this.make_dunning.bind(this),
 			"Invoice Discounting": this.make_invoice_discounting.bind(this),
 		};
+
+		this.frm.set_query("subscription", "items", function (doc, cdt, cdn) {
+			return {
+				query: "erpnext.accounts.doctype.subscription.subscription.get_subscriptions_for_item",
+				filters: {
+					item_code: locals[cdt][cdn].item_code,
+					party: doc.customer,
+					party_type: "Customer",
+				},
+			};
+		});
 	}
 	company() {
 		super.company();

@@ -307,12 +307,22 @@
    "link_fieldname": "subscription"
   },
   {
+   "group": "Buying",
+   "link_doctype": "Purchase Order",
+   "link_fieldname": "subscription"
+  },
+  {
    "group": "Selling",
    "link_doctype": "Sales Invoice",
    "link_fieldname": "subscription"
+  },
+  {
+   "group": "Selling",
+   "link_doctype": "Sales Order",
+   "link_fieldname": "subscription"
   }
  ],
- "modified": "2026-06-04 07:21:15.938170",
+ "modified": "2026-06-25 19:26:09.602734",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Subscription",

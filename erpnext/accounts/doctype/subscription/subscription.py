@@ -7,6 +7,7 @@ from datetime import date
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils.caching import request_cache
 from frappe.utils.data import (
 	add_days,
 	add_months,
@@ -300,16 +301,63 @@ class Subscription(Document):
 		elif not self.has_outstanding_invoice():
 			self.status = STATUS_ACTIVE
 
-	def _set_current_invoice_dates(self) -> None:
-		invoice = frappe.get_all(
-			self.invoice_document_type,
-			filters={"subscription": self.name, "docstatus": ("<", 2), "is_return": 0},
-			fields=["from_date", "to_date"],
-			order_by="to_date desc",
-			limit=1,
+	def _linked_invoice_names(self) -> set[str]:
+		"""Names of invoices linked to this subscription, either via the parent
+		`subscription` field or via any child item's `subscription` field."""
+		parent_doctype = self.invoice_document_type
+		via_parent = frappe.get_all(parent_doctype, filters={"subscription": self.name}, pluck="name")
+		via_item = frappe.get_all(
+			f"{parent_doctype} Item", filters={"subscription": self.name}, pluck="parent", distinct=True
 		)
-		self.current_invoice_start = invoice[0].from_date if invoice else None
-		self.current_invoice_end = invoice[0].to_date if invoice else None
+		return set(via_parent) | set(via_item)
+
+	def _set_current_invoice_dates(self) -> None:
+		parent_doctype = self.invoice_document_type
+
+		# Parent-linked invoices: the invoice-level from_date/to_date genuinely
+		# describe this subscription's period.
+		parent_invoices = frappe.get_all(
+			parent_doctype,
+			filters={"subscription": self.name, "docstatus": ("<", 2), "is_return": 0},
+			fields=["name", "from_date", "to_date"],
+		)
+		periods = [
+			{"period_start": inv.from_date, "period_end": inv.to_date}
+			for inv in parent_invoices
+			if inv.from_date and inv.to_date
+		]
+
+		# Item-only-linked invoices: on a multi-subscription invoice the invoice-level
+		# from_date/to_date may belong to a different subscription, so derive the
+		# period from this subscription's own item rows instead (same aggregation
+		# _item_billing_periods uses for the heatmap).
+		parent_names = {inv.name for inv in parent_invoices}
+		aggregated = self._aggregate_item_periods(parent_doctype, parent_names)
+		if aggregated:
+			valid_names = set(
+				frappe.get_all(
+					parent_doctype,
+					filters={
+						"name": ["in", list(aggregated.keys())],
+						"docstatus": ("<", 2),
+						"is_return": 0,
+					},
+					pluck="name",
+				)
+			)
+			periods += [
+				{"period_start": period["period_start"], "period_end": period["period_end"]}
+				for name, period in aggregated.items()
+				if name in valid_names
+			]
+
+		if periods:
+			latest = max(periods, key=lambda p: getdate(p["period_end"]))
+			self.current_invoice_start = latest["period_start"]
+			self.current_invoice_end = latest["period_end"]
+		else:
+			self.current_invoice_start = None
+			self.current_invoice_end = None
 
 	def is_trialling(self) -> bool:
 		"""
@@ -734,9 +782,13 @@ class Subscription(Document):
 		"""
 		Returns the most recent generated invoice.
 		"""
+		names = self._linked_invoice_names()
+		if not names:
+			return None
+
 		invoice = frappe.get_all(
 			self.invoice_document_type,
-			{"subscription": self.name, "docstatus": ("<", 2), "is_return": 0},
+			{"name": ["in", names], "docstatus": ("<", 2), "is_return": 0},
 			limit=1,
 			order_by="to_date desc",
 			pluck="name",
@@ -747,9 +799,12 @@ class Subscription(Document):
 
 	@property
 	def invoices(self) -> list[dict]:
+		names = self._linked_invoice_names()
+		if not names:
+			return []
 		return frappe.get_all(
 			self.invoice_document_type,
-			filters={"subscription": self.name},
+			filters={"name": ["in", names]},
 			order_by="from_date asc",
 		)
 
@@ -764,10 +819,14 @@ class Subscription(Document):
 		"""
 		Returns the count of submitted, non-return invoices that are not yet paid.
 		"""
+		names = self._linked_invoice_names()
+		if not names:
+			return 0
+
 		return frappe.db.count(
 			self.invoice_document_type,
 			{
-				"subscription": self.name,
+				"name": ["in", names],
 				"docstatus": 1,
 				"is_return": 0,
 				"status": ["!=", INVOICE_PAID],
@@ -779,10 +838,14 @@ class Subscription(Document):
 		`True` only when every submitted, not-`Paid` invoice on the subscription has
 		credit notes whose absolute total covers its outstanding amount.
 		"""
+		names = self._linked_invoice_names()
+		if not names:
+			return False
+
 		unpaid_invoices = frappe.get_all(
 			self.invoice_document_type,
 			filters={
-				"subscription": self.name,
+				"name": ["in", names],
 				"docstatus": 1,
 				"is_return": 0,
 				"status": ["!=", INVOICE_PAID],
@@ -882,8 +945,11 @@ class Subscription(Document):
 		return cells
 
 	def _billing_periods(self) -> list[dict]:
+		parent_doctype = self.invoice_document_type
+
+		# --- parent-level: invoices where the parent subscription field matches ---
 		invoices = frappe.get_all(
-			self.invoice_document_type,
+			parent_doctype,
 			filters={"subscription": self.name},
 			fields=[
 				"name",
@@ -917,7 +983,80 @@ class Subscription(Document):
 			if not invoice.is_return and invoice.from_date and invoice.to_date
 		]
 
+		# --- item-level: invoices found via child-table subscription field only ---
+		# These are multi-subscription invoices where only a line item references this
+		# subscription. Use the item's subscription_start/end_date for the period span
+		# and sum the item amounts for this subscription's share.
+		parent_names = {inv.name for inv in invoices}
+		item_periods = self._item_billing_periods(parent_doctype, parent_names)
+		periods.extend(item_periods)
+
+		periods.sort(key=lambda p: p["period_start"])
+
 		return [*periods, *self._planned_periods(periods)]
+
+	def _aggregate_item_periods(self, parent_doctype: str, exclude_names: set) -> dict[str, dict]:
+		"""Aggregate this subscription's item-level date/amount span per invoice, for
+		invoices found via the child-table `subscription` field only.
+
+		span = min(start)..max(end), amount = sum of matching items. Invoices already
+		covered by `exclude_names` (parent-linked) and items without a date range are
+		skipped -- the latter cannot be plotted on the heatmap or trusted for dates.
+		"""
+		items = frappe.get_all(
+			f"{parent_doctype} Item",
+			filters={"subscription": self.name},
+			fields=["parent", "subscription_start_date", "subscription_end_date", "amount"],
+		)
+
+		aggregated: dict[str, dict] = {}
+		for item in items:
+			if item.parent in exclude_names:
+				continue
+			if not item.subscription_start_date or not item.subscription_end_date:
+				continue
+			start, end = str(item.subscription_start_date), str(item.subscription_end_date)
+			if item.parent not in aggregated:
+				aggregated[item.parent] = {
+					"period_start": start,
+					"period_end": end,
+					"amount": flt(item.amount),
+				}
+			else:
+				agg = aggregated[item.parent]
+				agg["period_start"] = min(agg["period_start"], start)
+				agg["period_end"] = max(agg["period_end"], end)
+				agg["amount"] += flt(item.amount)
+
+		return aggregated
+
+	def _item_billing_periods(self, parent_doctype: str, exclude_names: set) -> list[dict]:
+		"""Billing periods sourced from child-table line items for multi-subscription invoices."""
+		aggregated = self._aggregate_item_periods(parent_doctype, exclude_names)
+		if not aggregated:
+			return []
+
+		parent_invoices = frappe.get_all(
+			parent_doctype,
+			filters={"name": ["in", list(aggregated.keys())]},
+			fields=["name", "status", "due_date", "docstatus", "is_return", "return_against"],
+		)
+
+		extra_credited = {
+			inv.return_against
+			for inv in parent_invoices
+			if inv.is_return and inv.docstatus == 1 and inv.return_against
+		}
+
+		return [
+			{
+				**aggregated[invoice.name],
+				"invoice": invoice.name,
+				"status": self._heatmap_status(invoice, invoice.name in extra_credited),
+			}
+			for invoice in parent_invoices
+			if not invoice.is_return
+		]
 
 	def _heatmap_status(self, invoice: dict, is_credited: bool) -> str:
 		if invoice.docstatus == 2:
@@ -966,6 +1105,175 @@ class Subscription(Document):
 			"period_start": None,
 			"period_end": None,
 		}
+
+
+@frappe.whitelist()
+def get_linked_item_docs(subscription_name: str) -> dict:
+	"""Return total and open counts (plus names) of orders/invoices linked to this subscription.
+
+	Unions parent-level and item-level subscription fields so that documents where
+	any line item references this subscription are included alongside those where the
+	parent field is set directly.  The open_count mirrors ERPNext's notification_config
+	filters so the open-notification badge remains semantically correct.
+	"""
+	frappe.has_permission("Subscription", "read", doc=subscription_name, throw=True)
+
+	child_to_parent = {
+		"Purchase Order Item": "Purchase Order",
+		"Purchase Invoice Item": "Purchase Invoice",
+		"Sales Order Item": "Sales Order",
+		"Sales Invoice Item": "Sales Invoice",
+	}
+
+	# Mirrors ERPNext's notification_config open filters (erpnext.startup.notifications).
+	# Applied to the union set so the open-notification badge is semantically correct.
+	link_filters: dict[str, dict] = {
+		"Purchase Order": {"status": ["not in", ["Completed", "Closed"]], "docstatus": ["<", 2]},
+		"Sales Order": {"status": ["not in", ["Completed", "Closed"]], "docstatus": ["<", 2]},
+		"Purchase Invoice": {"outstanding_amount": [">", 0], "docstatus": ["<", 2]},
+		"Sales Invoice": {"outstanding_amount": [">", 0], "docstatus": ["<", 2]},
+	}
+
+	result = {}
+	for child_doctype, parent_doctype in child_to_parent.items():
+		parent_t = frappe.qb.DocType(parent_doctype)
+		child_t = frappe.qb.DocType(child_doctype)
+
+		via_parent = set(
+			(
+				frappe.qb.from_(parent_t)
+				.select(parent_t.name)
+				.where(parent_t.subscription == subscription_name)
+			).run(pluck="name")
+		)
+		via_child = set(
+			(
+				frappe.qb.from_(child_t)
+				.select(child_t.parent)
+				.where(child_t.subscription == subscription_name)
+			).run(pluck="parent")
+		)
+		all_names = via_parent | via_child
+
+		# Re-fetch through the permission-checked API so names/counts only ever
+		# reflect documents the caller can actually read.
+		names = (
+			sorted(frappe.get_list(parent_doctype, filters={"name": ["in", list(all_names)]}, pluck="name"))
+			if all_names
+			else []
+		)
+
+		open_count = 0
+		if names and parent_doctype in link_filters:
+			open_filters = {"name": ["in", names], **link_filters[parent_doctype]}
+			open_count = len(frappe.get_list(parent_doctype, filters=open_filters, limit=len(names) + 1))
+
+		result[parent_doctype] = {"count": len(names), "open_count": open_count, "names": names}
+	return result
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_subscriptions_for_item(
+	doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict
+) -> list[list]:
+	"""Search query for the subscription link field on item child tables.
+
+	Restricts the list to subscriptions that contain a plan whose item matches
+	the current row's item_code, preventing mismatched subscription/item links.
+	"""
+	frappe.has_permission("Subscription", "read", throw=True)
+
+	item_code = filters.get("item_code")
+	if not item_code:
+		return []
+
+	plan_names = frappe.get_all("Subscription Plan", filters={"item": item_code}, pluck="name")
+	if not plan_names:
+		return []
+
+	subscription_names = frappe.get_all(
+		"Subscription Plan Detail",
+		filters={"plan": ["in", plan_names]},
+		pluck="parent",
+		distinct=True,
+	)
+	if not subscription_names:
+		return []
+
+	conditions = [["name", "in", subscription_names]]
+	party, party_type = filters.get("party"), filters.get("party_type")
+	if party and party_type:
+		conditions += [["party_type", "=", party_type], ["party", "=", party]]
+	if txt:
+		conditions.append([searchfield, "like", f"%{txt}%"])
+
+	return frappe.get_list(
+		"Subscription",
+		filters=conditions,
+		fields=["name"],
+		limit_start=start,
+		limit_page_length=page_len,
+		as_list=True,
+	)
+
+
+def get_document_subscription_names(doc) -> set[str]:
+	"""Subscriptions referenced by this document, either on its own `subscription`
+	field or on any child item's `subscription` field. Shared by SalesInvoice and
+	PurchaseInvoice's refresh_subscription_status."""
+	subscriptions = {item.subscription for item in doc.get("items", []) if item.get("subscription")}
+	if doc.get("subscription"):
+		subscriptions.add(doc.subscription)
+	return subscriptions
+
+
+def validate_subscription_party(subscription: str, party: str, party_type: str) -> None:
+	"""Raise if the subscription does not belong to the given party."""
+	subscription_party_type, subscription_party = frappe.db.get_value(
+		"Subscription", subscription, ["party_type", "party"]
+	) or (None, None)
+	if subscription_party_type != party_type or subscription_party != party:
+		frappe.throw(
+			_("Subscription {0} does not belong to {1} {2}.").format(
+				frappe.bold(subscription), party_type, frappe.bold(party)
+			),
+			title=_("Subscription Mismatch"),
+		)
+
+
+@request_cache
+def _get_subscription_plan_items(subscription: str) -> list[str]:
+	"""Items belonging to any plan on this subscription, via a single joined
+	query. Cached per request so a document with many item rows referencing
+	the same subscription doesn't re-run this for every row.
+	"""
+	plan_detail = frappe.qb.DocType("Subscription Plan Detail")
+	plan = frappe.qb.DocType("Subscription Plan")
+	return (
+		frappe.qb.from_(plan_detail)
+		.join(plan)
+		.on(plan_detail.plan == plan.name)
+		.select(plan.item)
+		.where(plan_detail.parent == subscription)
+	).run(pluck=True)
+
+
+def validate_subscription_item(
+	subscription: str, item_code: str, party: str | None = None, party_type: str | None = None
+) -> None:
+	"""Raise if the subscription has no plan whose item matches item_code, or if it
+	does not belong to the given party."""
+	if party and party_type:
+		validate_subscription_party(subscription, party, party_type)
+
+	if item_code not in _get_subscription_plan_items(subscription):
+		frappe.throw(
+			_("Item {0} is not in any plan belonging to Subscription {1}.").format(
+				frappe.bold(item_code), frappe.bold(subscription)
+			),
+			title=_("Subscription Mismatch"),
+		)
 
 
 def is_prorate() -> int:

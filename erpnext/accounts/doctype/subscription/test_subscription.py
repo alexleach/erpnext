@@ -653,6 +653,81 @@ class TestSubscription(ERPNextTestSuite):
 		except TypeError as e:
 			self.fail(f"validate_end_date crashed with no plans: {e}")
 
+	def test_lifecycle_methods_include_item_only_linked_invoices(self):
+		"""has_outstanding_invoice/get_current_invoice/is_fully_refunded/invoices/
+		_set_current_invoice_dates must see invoices linked only through a child
+		item's subscription field, not just the parent subscription field --
+		otherwise process() can ignore an outstanding invoice and duplicate-bill.
+
+		_set_current_invoice_dates must also derive the period from the matching
+		item's own dates rather than the invoice-level from_date/to_date, which on
+		a multi-subscription invoice can belong to a different subscription."""
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		create_plan(plan_name="_Test Item Link Plan", item="_Test Non Stock Item", cost=100, currency="INR")
+		subscription = create_subscription(plans=[{"plan": "_Test Item Link Plan", "qty": 1}])
+
+		si = create_sales_invoice(
+			item_code="_Test Non Stock Item", customer=subscription.party, do_not_save=True
+		)
+		si.items[0].subscription = subscription.name
+		si.items[0].subscription_start_date = "2026-01-01"
+		si.items[0].subscription_end_date = "2026-01-31"
+		# Invoice-level dates deliberately differ from the item's, standing in for a
+		# multi-subscription invoice where these belong to a different subscription.
+		si.from_date = "2026-03-01"
+		si.to_date = "2026-03-31"
+		si.insert()
+		si.submit()
+
+		self.assertEqual(subscription.has_outstanding_invoice(), 1)
+		self.assertFalse(subscription.is_fully_refunded())
+
+		current = subscription.get_current_invoice()
+		self.assertIsNotNone(current)
+		self.assertEqual(current.name, si.name)
+
+		invoice_names = {invoice.name for invoice in subscription.invoices}
+		self.assertEqual(invoice_names, {si.name})
+
+		subscription._set_current_invoice_dates()
+		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))
+		self.assertEqual(getdate(subscription.current_invoice_end), getdate("2026-01-31"))
+
+	def test_get_linked_item_docs_requires_subscription_read_permission(self):
+		"""A whitelisted endpoint must not let any logged-in user enumerate
+		subscriptions/linked documents regardless of their own read permissions."""
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.accounts.doctype.subscription.subscription import get_linked_item_docs
+
+		subscription = create_subscription()
+		unprivileged_user = create_user("test_subscription_no_access@example.com", "Employee")
+
+		with self.set_user(unprivileged_user.name):
+			self.assertRaises(frappe.PermissionError, get_linked_item_docs, subscription.name)
+
+	def test_get_subscriptions_for_item_requires_subscription_read_permission(self):
+		"""Same endpoint-level permission gap as above, for the item link-field query."""
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.accounts.doctype.subscription.subscription import get_subscriptions_for_item
+
+		create_plan(plan_name="_Test Perm Check Plan", item="_Test Non Stock Item", cost=100, currency="INR")
+		unprivileged_user = create_user("test_subscription_no_access@example.com", "Employee")
+
+		with self.set_user(unprivileged_user.name):
+			self.assertRaises(
+				frappe.PermissionError,
+				get_subscriptions_for_item,
+				"Subscription",
+				"",
+				"name",
+				0,
+				20,
+				{"item_code": "_Test Non Stock Item"},
+			)
+
 	def test_process_all_logs_error_when_first_subscription_fails(self):
 		sub1 = create_subscription(start_date="2018-01-01")
 		sub2 = create_subscription(start_date="2018-01-02")

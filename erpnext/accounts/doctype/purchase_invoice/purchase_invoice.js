@@ -42,6 +42,17 @@ erpnext.accounts.PurchaseInvoice = class PurchaseInvoice extends erpnext.buying.
 				},
 			};
 		});
+
+		this.frm.set_query("subscription", "items", function (doc, cdt, cdn) {
+			return {
+				query: "erpnext.accounts.doctype.subscription.subscription.get_subscriptions_for_item",
+				filters: {
+					item_code: locals[cdt][cdn].item_code,
+					party: doc.supplier,
+					party_type: "Supplier",
+				},
+			};
+		});
 	}
 
 	onload() {

@@ -3,6 +3,7 @@
 
 import copy
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe import qb
@@ -5539,6 +5540,153 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.is_debit_note = 1
 		si.update_stock = 1
 		self.assertRaises(frappe.ValidationError, si.save)
+
+	def test_refresh_subscription_status_covers_item_level_subscriptions(self):
+		"""On cancel, SalesInvoice.refresh_subscription_status must refresh every unique
+		subscription linked on its items, not just the invoice-level subscription field."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test Item Subscription Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		subscription_1 = create_subscription(plans=[{"plan": "_Test Item Subscription Plan", "qty": 1}])
+		subscription_2 = create_subscription(plans=[{"plan": "_Test Item Subscription Plan", "qty": 1}])
+
+		si = create_sales_invoice(item_code="_Test Non Stock Item", do_not_save=True)
+		si.items[0].subscription = subscription_1.name
+		si.append(
+			"items",
+			{
+				"item_code": "_Test Non Stock Item",
+				"item_name": "_Test Non Stock Item",
+				"qty": 1,
+				"rate": 100,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"subscription": subscription_2.name,
+			},
+		)
+		si.insert()
+		si.submit()
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.cancel()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertEqual(refreshed, {subscription_1.name, subscription_2.name})
+
+	def test_item_subscription_must_belong_to_invoice_customer(self):
+		"""An item's subscription must belong to the invoice's customer, even if the
+		subscription has a plan matching the item's item_code."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test Cross Customer Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test Cross Customer Plan", "qty": 1}]
+		)
+
+		si = create_sales_invoice(
+			item_code="_Test Non Stock Item", customer="_Test Customer", do_not_save=True
+		)
+		si.items[0].subscription = other_customer_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
+
+	def test_parent_subscription_must_belong_to_invoice_customer(self):
+		"""The invoice's own subscription field must belong to the invoice's
+		customer, not just each item's subscription."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test SI Parent Cross Customer Plan",
+			item="_Test Non Stock Item",
+			cost=100,
+			currency="INR",
+		)
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test SI Parent Cross Customer Plan", "qty": 1}]
+		)
+
+		si = create_sales_invoice(customer="_Test Customer", do_not_save=True)
+		si.subscription = other_customer_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
+
+	def test_get_subscriptions_for_item_filters_by_customer(self):
+		from erpnext.accounts.doctype.subscription.subscription import get_subscriptions_for_item
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test Query Plan", item="_Test Non Stock Item", cost=100, currency="INR")
+		matching_subscription = create_subscription(
+			party="_Test Customer", plans=[{"plan": "_Test Query Plan", "qty": 1}]
+		)
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test Query Plan", "qty": 1}]
+		)
+
+		results = get_subscriptions_for_item(
+			"Subscription",
+			"",
+			"name",
+			0,
+			20,
+			{"item_code": "_Test Non Stock Item", "party": "_Test Customer", "party_type": "Customer"},
+		)
+		names = {row[0] for row in results}
+		self.assertIn(matching_subscription.name, names)
+		self.assertNotIn(other_customer_subscription.name, names)
+
+	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
+		"""subscription fields are allow_on_submit, so changing an item's linked
+		subscription after submit must still refresh both the subscription it was
+		unlinked from and the one it was newly linked to."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test Update After Submit Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		old_subscription = create_subscription(plans=[{"plan": "_Test Update After Submit Plan", "qty": 1}])
+		new_subscription = create_subscription(plans=[{"plan": "_Test Update After Submit Plan", "qty": 1}])
+
+		si = create_sales_invoice(item_code="_Test Non Stock Item", do_not_save=True)
+		si.items[0].subscription = old_subscription.name
+		si.insert()
+		si.submit()
+
+		si.reload()
+		si.items[0].subscription = new_subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.save()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
+
+	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
+		"""A standard (non-return) submitted invoice must refresh its linked
+		subscription too, not only on return/cancel."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test SI On Submit Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		subscription = create_subscription(plans=[{"plan": "_Test SI On Submit Plan", "qty": 1}])
+
+		si = create_sales_invoice(item_code="_Test Non Stock Item", do_not_save=True)
+		si.items[0].subscription = subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.insert()
+			si.submit()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertIn(subscription.name, refreshed)
 
 
 def make_item_for_si(item_code, properties=None):

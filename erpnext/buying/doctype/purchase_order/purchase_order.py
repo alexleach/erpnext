@@ -140,6 +140,9 @@ class PurchaseOrder(BuyingController):
 			"Closed",
 			"Delivered",
 		]
+		subscription: DF.Link | None
+		subscription_end_date: DF.Date | None
+		subscription_start_date: DF.Date | None
 		supplier: DF.Link
 		supplier_address: DF.Link | None
 		supplier_group: DF.Link | None
@@ -204,6 +207,7 @@ class PurchaseOrder(BuyingController):
 
 		self.validate_uom_is_integer("uom", "qty")
 		self.validate_uom_is_integer("stock_uom", "stock_qty")
+		self.validate_item_subscriptions()
 
 		self.validate_with_previous_doc()
 		self.validate_minimum_order_qty()
@@ -229,6 +233,15 @@ class PurchaseOrder(BuyingController):
 		self.has_unit_price_items = any(
 			not row.qty for row in self.get("items") if (row.item_code and not row.qty)
 		)
+
+	def validate_item_subscriptions(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.supplier, "Supplier")
+
+		for item in self.items:
+			item.validate_subscription(self.supplier)
 
 	def validate_with_previous_doc(self):
 		mri_compare_fields = [["project", "="], ["item_code", "="]]
