@@ -3390,6 +3390,37 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
 		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
 
+	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
+		"""A standard (non-return) submitted invoice must refresh its linked
+		subscription too, not only on return/cancel."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(
+			plan_name="_Test PI On Submit Plan", item="_Test Non Stock Item", cost=100, currency="INR"
+		)
+		subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI On Submit Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			item_code="_Test Non Stock Item",
+			supplier="_Test Supplier",
+			parent_cost_center="_Test Cost Center - _TC",
+			do_not_save=True,
+		)
+		pi.items[0].subscription = subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.purchase_invoice.purchase_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			pi.insert()
+			pi.submit()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertIn(subscription.name, refreshed)
+
 
 def set_advance_flag(company, flag, default_account):
 	frappe.db.set_value(

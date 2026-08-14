@@ -668,8 +668,7 @@ class PurchaseInvoice(BuyingController):
 
 		self.process_common_party_accounting()
 
-		if self.is_return:
-			self.refresh_subscription_status()
+		self.refresh_subscription_status()
 
 	def on_update_after_submit(self):
 		fields_to_check = [
