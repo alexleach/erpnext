@@ -969,15 +969,15 @@ class Subscription(Document):
 		}
 
 
-def validate_subscription_party(
-	subscription: str, party: str, party_type: str, company: str | None = None
-) -> None:
-	"""Raise if the subscription does not belong to the given party, or (when given)
-	if it belongs to a different company -- the same Customer/Supplier can have
-	separate subscriptions under different companies."""
+def validate_subscription_document(subscription: str, doc: Document) -> None:
+	"""Raise if `subscription` does not belong to `doc`'s party, or (when set) to a
+	different company -- the same Customer/Supplier can have separate subscriptions
+	under different companies."""
+	party_type, party = ("Customer", doc.customer) if doc.get("customer") else ("Supplier", doc.supplier)
 	subscription_party_type, subscription_party, subscription_company = frappe.db.get_value(
 		"Subscription", subscription, ["party_type", "party", "company"]
 	) or (None, None, None)
+
 	if subscription_party_type != party_type or subscription_party != party:
 		frappe.throw(
 			_("Subscription {0} does not belong to {1} {2}.").format(
@@ -985,10 +985,10 @@ def validate_subscription_party(
 			),
 			title=_("Subscription Mismatch"),
 		)
-	if company and subscription_company and subscription_company != company:
+	if doc.get("company") and subscription_company and subscription_company != doc.company:
 		frappe.throw(
 			_("Subscription {0} does not belong to Company {1}.").format(
-				frappe.bold(subscription), frappe.bold(company)
+				frappe.bold(subscription), frappe.bold(doc.company)
 			),
 			title=_("Subscription Mismatch"),
 		)
