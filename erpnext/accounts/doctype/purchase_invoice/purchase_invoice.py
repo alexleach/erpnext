@@ -576,7 +576,7 @@ class PurchaseInvoice(BuyingController):
 		if self.get("subscription"):
 			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
 
-			validate_subscription_party(self.subscription, self.supplier, "Supplier")
+			validate_subscription_party(self.subscription, self.supplier, "Supplier", self.company)
 
 	def check_prev_docstatus(self):
 		for d in self.get("items"):

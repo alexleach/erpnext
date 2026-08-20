@@ -5554,6 +5554,23 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.subscription = other_customer_subscription.name
 		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
 
+	def test_subscription_must_belong_to_invoice_company(self):
+		"""The invoice's subscription field must belong to the invoice's company,
+		even when the party matches -- the same customer can have separate
+		subscriptions under different companies."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test Cross Company Plan", cost=100, currency="USD")
+		other_company_subscription = create_subscription(
+			company="_Test Company 1",
+			party="_Test Customer",
+			plans=[{"plan": "_Test Cross Company Plan", "qty": 1}],
+		)
+
+		si = create_sales_invoice(customer="_Test Customer", do_not_save=True)
+		si.subscription = other_company_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
+
 	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
 		"""A standard (non-return) submitted invoice must refresh its linked
 		subscription too, not only on return/cancel."""
