@@ -3,6 +3,7 @@
 
 import copy
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe import qb
@@ -5539,6 +5540,65 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.is_debit_note = 1
 		si.update_stock = 1
 		self.assertRaises(frappe.ValidationError, si.save)
+
+	def test_subscription_must_belong_to_invoice_customer(self):
+		"""The invoice's subscription field must belong to the invoice's customer."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test Cross Customer Plan", cost=100, currency="INR")
+		other_customer_subscription = create_subscription(
+			party="_Test Customer 1", plans=[{"plan": "_Test Cross Customer Plan", "qty": 1}]
+		)
+
+		si = create_sales_invoice(customer="_Test Customer", do_not_save=True)
+		si.subscription = other_customer_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", si.insert)
+
+	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
+		"""A standard (non-return) submitted invoice must refresh its linked
+		subscription too, not only on return/cancel."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test On Submit Plan", cost=100, currency="INR")
+		subscription = create_subscription(plans=[{"plan": "_Test On Submit Plan", "qty": 1}])
+
+		si = create_sales_invoice(do_not_save=True)
+		si.subscription = subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.insert()
+			si.submit()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertIn(subscription.name, refreshed)
+
+	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
+		"""subscription is allow_on_submit, so changing it after submit must still
+		refresh both the subscription it was unlinked from and the one it was
+		newly linked to."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test Update After Submit Plan", cost=100, currency="INR")
+		old_subscription = create_subscription(plans=[{"plan": "_Test Update After Submit Plan", "qty": 1}])
+		new_subscription = create_subscription(plans=[{"plan": "_Test Update After Submit Plan", "qty": 1}])
+
+		si = create_sales_invoice(do_not_save=True)
+		si.subscription = old_subscription.name
+		si.insert()
+		si.submit()
+
+		si.reload()
+		si.subscription = new_subscription.name
+
+		with patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
+		) as mock_refresh:
+			si.save()
+
+		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
+		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
 
 
 def make_item_for_si(item_code, properties=None):

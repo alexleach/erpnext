@@ -314,6 +314,7 @@ class SalesInvoice(SellingController):
 		FixedAssetService(self).validate_fixed_asset()
 		FixedAssetService(self).set_income_account_for_fixed_assets()
 		self.validate_item_cost_centers()
+		self.validate_subscription()
 		self.check_conversion_rate()
 		self.validate_accounts()
 
@@ -412,6 +413,12 @@ class SalesInvoice(SellingController):
 		for item in self.items:
 			item.validate_cost_center(self.company)
 
+	def validate_subscription(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.customer, "Customer")
+
 	def validate_income_account(self):
 		for item in self.get("items"):
 			validate_account_head(item.idx, item.income_account, self.company, _("Income"))
@@ -504,8 +511,7 @@ class SalesInvoice(SellingController):
 		self.process_common_party_accounting()
 		self.update_billed_qty_in_scio()
 
-		if self.is_return:
-			self.refresh_subscription_status()
+		self.refresh_subscription_status()
 
 	def before_cancel(self):
 		POSService(self).check_if_created_using_pos_and_pos_closing_entry_generated()
@@ -721,8 +727,17 @@ class SalesInvoice(SellingController):
 		return POSService(self).set_pos_fields(for_validate)
 
 	def refresh_subscription_status(self):
+		if self.flags.from_subscription_generation:
+			# Do not refresh if this invoice is being generated from a Subscription.
+			return
+
 		if self.get("subscription"):
 			refresh_subscription_status(self.subscription)
+
+		doc_before_save = self.get_doc_before_save()
+		if doc_before_save and doc_before_save.get("subscription"):
+			# Refresh subscription status for the previous subscription if it has changed.
+			refresh_subscription_status(doc_before_save.subscription)
 
 	@frappe.whitelist()
 	def reset_mode_of_payments(self):
@@ -1178,10 +1193,12 @@ class SalesInvoice(SellingController):
 			"taxes": ("account_head",),
 			"payments": ("account",),
 		}
-		self.needs_repost = self.check_if_fields_updated(fields_to_check, child_tables)
-		if self.needs_repost:
+		needs_repost = self.check_if_fields_updated(fields_to_check, child_tables)
+		if needs_repost:
 			self.validate_for_repost()
 			self.repost_accounting_entries()
+
+		self.refresh_subscription_status()
 
 	def set_status(self, update=False, status=None, update_modified=True):
 		StatusService(self).set_status(update, status, update_modified)
