@@ -631,6 +631,14 @@ class Subscription(Document):
 		invoice.save()
 
 		if self.submit_invoice:
+			# Submitting here reaches this same Subscription's refresh_subscription_status
+			# (on_submit is unconditional now that subscription fields are
+			# allow_on_submit). This method's own callers (process()/
+			# cancel_subscription()) already recalculate and save self's status
+			# right after generating the invoice, so let them do it -- a nested
+			# refresh-and-save here would race the still in-memory outer save and
+			# raise TimestampMismatchError.
+			invoice.flags.from_subscription_generation = True
 			invoice.submit()
 
 		return invoice

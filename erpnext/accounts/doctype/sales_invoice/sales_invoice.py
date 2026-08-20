@@ -726,6 +726,14 @@ class SalesInvoice(SellingController):
 		return POSService(self).set_pos_fields(for_validate)
 
 	def refresh_subscription_status(self):
+		if self.flags.from_subscription_generation:
+			# Subscription.generate_invoice() submits this invoice as part of its own
+			# process()/cancel_subscription() flow, which already recalculates and
+			# saves the subscription's status right after. Doing it again here would
+			# reload and save the same Subscription while that outer call is still
+			# mid-save, racing it into a TimestampMismatchError.
+			return
+
 		from erpnext.accounts.doctype.subscription.subscription import get_document_subscription_names
 
 		subscriptions = get_document_subscription_names(self)
