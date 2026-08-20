@@ -415,9 +415,9 @@ class SalesInvoice(SellingController):
 
 	def validate_subscription(self):
 		if self.get("subscription"):
-			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_document
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_sale
 
-			validate_subscription_document(self.subscription, self)
+			validate_subscription_sale(self.subscription, self)
 
 	def validate_income_account(self):
 		for item in self.get("items"):
