@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder.functions import Sum
-from frappe.utils import comma_or, flt, get_link_to_form, getdate, now, nowdate, safe_div
+from frappe.utils import cint, comma_or, flt, get_link_to_form, getdate, now, nowdate, safe_div
 
 
 class OverAllowanceError(frappe.ValidationError):
@@ -263,10 +263,16 @@ class StatusUpdater(Document):
 
 		return {"status": self.status}
 
+	def allows_mixed_qty_signs(self) -> bool:
+		"""On a non-stock invoice a row's sign carries no stock direction, only the
+		direction of the amount, so refund and charge lines may share one document."""
+		return self.doctype in ("Sales Invoice", "Purchase Invoice") and not cint(self.get("update_stock"))
+
 	def validate_qty(self):
 		"""Validates qty at row level"""
 		selling_doctypes = ("Sales Order", "Sales Invoice", "Delivery Note")
 		buying_doctypes = ("Purchase Order", "Purchase Invoice", "Purchase Receipt")
+		mixed_qty_signs_allowed = self.allows_mixed_qty_signs()
 
 		for args in self.status_updater:
 			if "target_ref_field" not in args or args.get("validate_qty") is False:
@@ -289,11 +295,16 @@ class StatusUpdater(Document):
 
 			# get unique transactions to update
 			for d in self.get_all_children():
-				if hasattr(d, "qty") and flt(d.qty) < 0 and not self.get("is_return"):
-					frappe.throw(_("For an item {0}, quantity must be a positive number").format(d.item_code))
+				if not mixed_qty_signs_allowed and hasattr(d, "qty"):
+					if flt(d.qty) < 0 and not self.get("is_return"):
+						frappe.throw(
+							_("For an item {0}, quantity must be a positive number").format(d.item_code)
+						)
 
-				if hasattr(d, "qty") and flt(d.qty) > 0 and self.get("is_return"):
-					frappe.throw(_("For an item {0}, quantity must be a negative number").format(d.item_code))
+					if flt(d.qty) > 0 and self.get("is_return"):
+						frappe.throw(
+							_("For an item {0}, quantity must be a negative number").format(d.item_code)
+						)
 
 				if (not selling_negative_rate_allowed and self.doctype in selling_doctypes) or (
 					not buying_negative_rate_allowed and self.doctype in buying_doctypes

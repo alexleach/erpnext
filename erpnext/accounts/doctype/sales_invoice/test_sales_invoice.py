@@ -122,6 +122,86 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.append("items", {"item_code": "_Test Item 2", "qty": 1, "rate": -150})
 		self.assertRaises(frappe.ValidationError, si.save)
 
+	def _make_change_order_credit_note(self, new_item_rate, **args):
+		"""A change order as one credit note: the remainder of the old subscription is
+		refunded (negative qty) and the replacement charged on the same document."""
+		si = create_sales_invoice(qty=1, rate=1000, update_stock=args.get("update_stock"))
+
+		cr_note = create_sales_invoice(
+			qty=-1,
+			rate=1000,
+			is_return=1,
+			return_against=si.name,
+			update_stock=args.get("update_stock"),
+			do_not_save=True,
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": new_item_rate,
+				"warehouse": "_Test Warehouse - _TC",
+				"income_account": "Sales - _TC",
+				"expense_account": "Cost of Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		return cr_note
+
+	def test_credit_note_allows_mixed_qty_signs_on_downgrade(self):
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.insert()
+		cr_note.submit()
+		cr_note.reload()
+
+		self.assertEqual(cr_note.grand_total, -700)
+		self.assertEqual(cr_note.outstanding_amount, -700)
+		self.assertEqual(cr_note.status, "Return")
+
+	def test_credit_note_allows_mixed_qty_signs_on_upgrade(self):
+		"""An upgrade nets positive; the net sign does not decide whether the rows may
+		be mixed."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=1500)
+		cr_note.insert()
+		cr_note.submit()
+		cr_note.reload()
+
+		self.assertEqual(cr_note.grand_total, 500)
+		self.assertEqual(cr_note.outstanding_amount, 500)
+
+	def test_credit_note_with_update_stock_rejects_mixed_qty_signs(self):
+		"""On a stock-bearing invoice the sign of qty also picks the direction of the
+		Stock Ledger Entry."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300, update_stock=1)
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
+	def test_credit_note_rejects_positive_qty_on_row_linked_to_return_against(self):
+		"""Mixing signs must not inflate the return of an existing line."""
+		si = create_sales_invoice(qty=1, rate=1000)
+
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item",
+				"qty": 1,
+				"rate": 100,
+				"sales_invoice_item": si.items[0].name,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
+	def test_credit_note_without_return_against_requires_a_negative_row(self):
+		cr_note = create_sales_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
 	def test_timestamp_change(self):
 		w = frappe.copy_doc(self.globalTestRecords["Sales Invoice"][0])
 		w.docstatus = 0
