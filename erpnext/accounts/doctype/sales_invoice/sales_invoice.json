@@ -2032,7 +2032,7 @@
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
-   "link_filters": "[[\"Subscription\",\"company\",\"=\",\"eval:doc.company\"]]",
+   "link_filters": "[[\"Subscription\", \"company\", \"=\", \"eval:doc.company\"],[\"Subscription\", \"party\", \"=\", \"eval:doc.party\"]]",
    "options": "Subscription"
   },
   {
@@ -2407,7 +2407,7 @@
    "link_fieldname": "consolidated_invoice"
   }
  ],
- "modified": "2026-08-22 19:52:10.134959",
+ "modified": "2026-08-22 20:06:29.217975",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Sales Invoice",
