@@ -2623,7 +2623,7 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
-	def _make_change_order_credit_note(self, new_item_rate, **args):
+	def _create_change_order_debit_note(self, new_item_rate, **args):
 		"""A supplier change order as one credit note: the remainder of the old
 		subscription is refunded (negative qty) and the replacement billed alongside."""
 		pi = make_purchase_invoice(qty=1, rate=1000, update_stock=args.get("update_stock"))
@@ -2651,8 +2651,8 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		)
 		return dr_note
 
-	def test_supplier_credit_note_allows_mixed_qty_signs_on_downgrade(self):
-		dr_note = self._make_change_order_credit_note(new_item_rate=300)
+	def test_debit_note_allows_mixed_qty_signs_on_downgrade(self):
+		dr_note = self._create_change_order_debit_note(new_item_rate=300)
 		dr_note.save()
 		dr_note.submit()
 		dr_note.reload()
@@ -2660,10 +2660,10 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		self.assertEqual(dr_note.grand_total, -700)
 		self.assertEqual(dr_note.outstanding_amount, -700)
 
-	def test_supplier_credit_note_allows_mixed_qty_signs_on_upgrade(self):
+	def test_debit_note_allows_mixed_qty_signs_on_upgrade(self):
 		"""An upgrade nets positive; the net sign does not decide whether the rows may
 		be mixed."""
-		dr_note = self._make_change_order_credit_note(new_item_rate=1500)
+		dr_note = self._create_change_order_debit_note(new_item_rate=1500)
 		dr_note.save()
 		dr_note.submit()
 		dr_note.reload()
@@ -2671,13 +2671,13 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		self.assertEqual(dr_note.grand_total, 500)
 		self.assertEqual(dr_note.outstanding_amount, 500)
 
-	def test_supplier_credit_note_with_update_stock_rejects_mixed_qty_signs(self):
+	def test_debit_note_with_update_stock_rejects_mixed_qty_signs(self):
 		"""On a stock-bearing invoice the sign of qty also picks the direction of the
 		Stock Ledger Entry."""
-		dr_note = self._make_change_order_credit_note(new_item_rate=300, update_stock=1)
+		dr_note = self._create_change_order_debit_note(new_item_rate=300, update_stock=1)
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
-	def test_supplier_credit_note_without_return_against_requires_a_negative_row(self):
+	def test_debit_note_without_return_against_requires_a_negative_row(self):
 		dr_note = make_purchase_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
