@@ -1460,6 +1460,7 @@
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
+   "link_filters": "[[\"Subscription\", \"company\", \"=\", \"eval:doc.company\"]]",
    "options": "Subscription"
   },
   {
@@ -1697,7 +1698,7 @@
  "idx": 204,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-08-12 12:00:00.000000",
+ "modified": "2026-08-22 19:52:58.282711",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice",
