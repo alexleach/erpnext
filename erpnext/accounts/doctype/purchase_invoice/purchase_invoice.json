@@ -1460,7 +1460,7 @@
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
-   "link_filters": "[[\"Subscription\", \"company\", \"=\", \"eval:doc.company\"],[\"Subscription\", \"party\", \"=\", \"eval:doc.party\"]]",
+   "link_filters": "[[\"Subscription\", \"company\", \"=\", \"eval:doc.company\"],[\"Subscription\", \"party\", \"=\", \"eval:doc.supplier\"]]",
    "options": "Subscription"
   },
   {
