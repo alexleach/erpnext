@@ -731,13 +731,14 @@ class SalesInvoice(SellingController):
 			# Do not refresh if this invoice is being generated from a Subscription.
 			return
 
-		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
-
 		doc_before_save = self.get_doc_before_save()
-		if doc_before_save and doc_before_save.get("subscription"):
-			# Refresh subscription status for the previous subscription if it has changed.
-			refresh_subscription_status(doc_before_save.subscription)
+		previous_subscription = doc_before_save.get("subscription") if doc_before_save else None
+
+		if subscription := self.get("subscription"):
+			refresh_subscription_status(subscription)
+
+		if previous_subscription and previous_subscription != subscription:
+			refresh_subscription_status(previous_subscription)
 
 	@frappe.whitelist()
 	def reset_mode_of_payments(self):

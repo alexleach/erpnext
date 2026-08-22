@@ -726,12 +726,14 @@ class PurchaseInvoice(BuyingController):
 		if self.flags.from_subscription_generation:
 			return
 
-		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
-
 		doc_before_save = self.get_doc_before_save()
-		if doc_before_save and doc_before_save.get("subscription"):
-			refresh_subscription_status(doc_before_save.subscription)
+		previous_subscription = doc_before_save.get("subscription") if doc_before_save else None
+
+		if subscription := self.get("subscription"):
+			refresh_subscription_status(subscription)
+
+		if previous_subscription and previous_subscription != subscription:
+			refresh_subscription_status(previous_subscription)
 
 	def make_gl_entries(self, gl_entries=None, from_repost=False):
 		update_outstanding = "No" if (cint(self.is_paid) or self.write_off_account) else "Yes"
