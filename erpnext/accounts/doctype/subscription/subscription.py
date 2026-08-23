@@ -982,7 +982,7 @@ def _validate_subscription_party(subscription: str, party: str, party_type: str)
 		)
 
 
-def validate_subscription_company(subscription: str, doc: Document) -> None:
+def _validate_subscription_company(subscription: str, doc: Document) -> None:
 	"""Raise if `subscription` belongs to a different company than `doc`'s -- the
 	same Customer/Supplier can have separate subscriptions under different
 	companies."""
@@ -1001,13 +1001,13 @@ def validate_subscription_company(subscription: str, doc: Document) -> None:
 def validate_subscription_sale(subscription: str, doc: Document) -> None:
 	"""Raise if `subscription` doesn't belong to `doc`'s customer or company."""
 	_validate_subscription_party(subscription, doc.customer, "Customer")
-	validate_subscription_company(subscription, doc)
+	_validate_subscription_company(subscription, doc)
 
 
 def validate_subscription_purchase(subscription: str, doc: Document) -> None:
 	"""Raise if `subscription` doesn't belong to `doc`'s supplier or company."""
 	_validate_subscription_party(subscription, doc.supplier, "Supplier")
-	validate_subscription_company(subscription, doc)
+	_validate_subscription_company(subscription, doc)
 
 
 def is_prorate() -> int:
