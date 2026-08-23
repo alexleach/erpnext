@@ -2,8 +2,6 @@
 # License: GNU General Public License v3. See license.txt
 
 
-from unittest.mock import patch
-
 import frappe
 from frappe.query_builder.functions import Sum
 from frappe.utils import add_days, cint, flt, getdate, nowdate, today
@@ -3339,19 +3337,21 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 			plans=[{"plan": "_Test PI On Submit Plan", "qty": 1}],
 		)
 
+		self.assertIsNone(subscription.current_invoice_start)
+
 		pi = make_purchase_invoice(
 			supplier="_Test Supplier", parent_cost_center="_Test Cost Center - _TC", do_not_save=True
 		)
 		pi.subscription = subscription.name
+		pi.from_date = "2026-01-01"
+		pi.to_date = "2026-01-31"
+		pi.insert()
+		pi.submit()
 
-		with patch(
-			"erpnext.accounts.doctype.purchase_invoice.purchase_invoice.refresh_subscription_status"
-		) as mock_refresh:
-			pi.insert()
-			pi.submit()
-
-		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
-		self.assertIn(subscription.name, refreshed)
+		# Refreshing recalculates the subscription's current period from its invoices.
+		subscription.reload()
+		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))
+		self.assertEqual(getdate(subscription.current_invoice_end), getdate("2026-01-31"))
 
 	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
 		"""subscription is allow_on_submit, so changing it after submit must still
@@ -3375,19 +3375,23 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 			supplier="_Test Supplier", parent_cost_center="_Test Cost Center - _TC", do_not_save=True
 		)
 		pi.subscription = old_subscription.name
+		pi.from_date = "2026-01-01"
+		pi.to_date = "2026-01-31"
 		pi.insert()
 		pi.submit()
 
+		old_subscription.reload()
+		self.assertEqual(getdate(old_subscription.current_invoice_start), getdate("2026-01-01"))
+
 		pi.reload()
 		pi.subscription = new_subscription.name
+		pi.save()
 
-		with patch(
-			"erpnext.accounts.doctype.purchase_invoice.purchase_invoice.refresh_subscription_status"
-		) as mock_refresh:
-			pi.save()
-
-		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
-		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
+		# The old subscription has lost its only invoice; the new one has gained it.
+		old_subscription.reload()
+		new_subscription.reload()
+		self.assertIsNone(old_subscription.current_invoice_start)
+		self.assertEqual(getdate(new_subscription.current_invoice_start), getdate("2026-01-01"))
 
 
 def set_advance_flag(company, flag, default_account):

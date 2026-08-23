@@ -3,7 +3,6 @@
 
 import copy
 import json
-from unittest.mock import patch
 
 import frappe
 from frappe import qb
@@ -5578,18 +5577,19 @@ class TestSalesInvoice(ERPNextTestSuite):
 
 		create_plan(plan_name="_Test On Submit Plan", cost=100, currency="INR")
 		subscription = create_subscription(plans=[{"plan": "_Test On Submit Plan", "qty": 1}])
+		self.assertIsNone(subscription.current_invoice_start)
 
 		si = create_sales_invoice(do_not_save=True)
 		si.subscription = subscription.name
+		si.from_date = "2026-01-01"
+		si.to_date = "2026-01-31"
+		si.insert()
+		si.submit()
 
-		with patch(
-			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
-		) as mock_refresh:
-			si.insert()
-			si.submit()
-
-		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
-		self.assertIn(subscription.name, refreshed)
+		# Refreshing recalculates the subscription's current period from its invoices.
+		subscription.reload()
+		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))
+		self.assertEqual(getdate(subscription.current_invoice_end), getdate("2026-01-31"))
 
 	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
 		"""subscription is allow_on_submit, so changing it after submit must still
@@ -5603,19 +5603,23 @@ class TestSalesInvoice(ERPNextTestSuite):
 
 		si = create_sales_invoice(do_not_save=True)
 		si.subscription = old_subscription.name
+		si.from_date = "2026-01-01"
+		si.to_date = "2026-01-31"
 		si.insert()
 		si.submit()
 
+		old_subscription.reload()
+		self.assertEqual(getdate(old_subscription.current_invoice_start), getdate("2026-01-01"))
+
 		si.reload()
 		si.subscription = new_subscription.name
+		si.save()
 
-		with patch(
-			"erpnext.accounts.doctype.sales_invoice.sales_invoice.refresh_subscription_status"
-		) as mock_refresh:
-			si.save()
-
-		refreshed = {call.args[0] for call in mock_refresh.call_args_list}
-		self.assertEqual(refreshed, {old_subscription.name, new_subscription.name})
+		# The old subscription has lost its only invoice; the new one has gained it.
+		old_subscription.reload()
+		new_subscription.reload()
+		self.assertIsNone(old_subscription.current_invoice_start)
+		self.assertEqual(getdate(new_subscription.current_invoice_start), getdate("2026-01-01"))
 
 
 def make_item_for_si(item_code, properties=None):
