@@ -583,6 +583,7 @@ class Subscription(Document):
 		invoice.save()
 
 		if self.submit_invoice:
+			invoice.flags.from_subscription_generation = True
 			invoice.submit()
 
 		return invoice
@@ -966,6 +967,47 @@ class Subscription(Document):
 			"period_start": None,
 			"period_end": None,
 		}
+
+
+def _validate_subscription_party(subscription: str, party: str, party_type: str) -> None:
+	subscription_party_type, subscription_party = frappe.db.get_value(
+		"Subscription", subscription, ["party_type", "party"]
+	) or (None, None)
+	if subscription_party_type != party_type or subscription_party != party:
+		frappe.throw(
+			_("Subscription {0} does not belong to {1} {2}.").format(
+				frappe.bold(subscription), party_type, frappe.bold(party)
+			),
+			title=_("Subscription Mismatch"),
+		)
+
+
+def _validate_subscription_company(subscription: str, doc: Document) -> None:
+	"""Raise if `subscription` belongs to a different company than `doc`'s -- the
+	same Customer/Supplier can have separate subscriptions under different
+	companies."""
+	if not doc.get("company"):
+		return
+	subscription_company = frappe.db.get_value("Subscription", subscription, "company")
+	if subscription_company and subscription_company != doc.company:
+		frappe.throw(
+			_("Subscription {0} does not belong to Company {1}.").format(
+				frappe.bold(subscription), frappe.bold(doc.company)
+			),
+			title=_("Subscription Mismatch"),
+		)
+
+
+def validate_subscription_sale(subscription: str, doc: Document) -> None:
+	"""Raise if `subscription` doesn't belong to `doc`'s customer or company."""
+	_validate_subscription_party(subscription, doc.customer, "Customer")
+	_validate_subscription_company(subscription, doc)
+
+
+def validate_subscription_purchase(subscription: str, doc: Document) -> None:
+	"""Raise if `subscription` doesn't belong to `doc`'s supplier or company."""
+	_validate_subscription_party(subscription, doc.supplier, "Supplier")
+	_validate_subscription_company(subscription, doc)
 
 
 def is_prorate() -> int:

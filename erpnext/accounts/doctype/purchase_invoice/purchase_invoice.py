@@ -289,6 +289,7 @@ class PurchaseInvoice(BuyingController):
 		expense_account_service.set_against_expense_account()
 		self.validate_write_off_account()
 		self.validate_write_off_cost_center()
+		self.validate_subscription()
 
 		from erpnext.accounts.services.billing_validation import BillingValidationService
 
@@ -571,6 +572,12 @@ class PurchaseInvoice(BuyingController):
 		if not doc or doc.is_group or doc.company != self.company:
 			throw(_("Please enter a valid Write Off Cost Center"))
 
+	def validate_subscription(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_purchase
+
+			validate_subscription_purchase(self.subscription, self)
+
 	def check_prev_docstatus(self):
 		for d in self.get("items"):
 			if d.purchase_order:
@@ -698,8 +705,7 @@ class PurchaseInvoice(BuyingController):
 
 		self.process_common_party_accounting()
 
-		if self.is_return:
-			self.refresh_subscription_status()
+		self.refresh_subscription_status()
 
 	def on_update_after_submit(self):
 		fields_to_check = [
@@ -709,14 +715,25 @@ class PurchaseInvoice(BuyingController):
 			"is_opening",
 		]
 		child_tables = {"items": ("expense_account",), "taxes": ("account_head",)}
-		self.needs_repost = self.check_if_fields_updated(fields_to_check, child_tables)
-		if self.needs_repost:
+		needs_repost = self.check_if_fields_updated(fields_to_check, child_tables)
+		if needs_repost:
 			self.validate_for_repost()
 			self.repost_accounting_entries()
 
+		self.refresh_subscription_status()
+
 	def refresh_subscription_status(self):
-		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
+		if self.flags.from_subscription_generation:
+			return
+
+		doc_before_save = self.get_doc_before_save()
+		previous_subscription = doc_before_save.get("subscription") if doc_before_save else None
+
+		if subscription := self.get("subscription"):
+			refresh_subscription_status(subscription)
+
+		if previous_subscription and previous_subscription != subscription:
+			refresh_subscription_status(previous_subscription)
 
 	def make_gl_entries(self, gl_entries=None, from_repost=False):
 		update_outstanding = "No" if (cint(self.is_paid) or self.write_off_account) else "Yes"

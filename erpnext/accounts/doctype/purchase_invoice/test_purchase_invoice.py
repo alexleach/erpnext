@@ -3288,6 +3288,111 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		party_link.delete()
 
+	def test_subscription_must_belong_to_invoice_supplier(self):
+		"""The invoice's subscription field must belong to the invoice's supplier."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test PI Cross Supplier Plan", cost=100, currency="INR")
+		other_supplier_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier 1",
+			plans=[{"plan": "_Test PI Cross Supplier Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			supplier="_Test Supplier", parent_cost_center="_Test Cost Center - _TC", do_not_save=True
+		)
+		pi.subscription = other_supplier_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", pi.insert)
+
+	def test_subscription_must_belong_to_invoice_company(self):
+		"""The invoice's subscription field must belong to the invoice's company,
+		even when the party matches -- the same supplier can have separate
+		subscriptions under different companies."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test PI Cross Company Plan", cost=100, currency="USD")
+		other_company_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			company="_Test Company 1",
+			plans=[{"plan": "_Test PI Cross Company Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			supplier="_Test Supplier", parent_cost_center="_Test Cost Center - _TC", do_not_save=True
+		)
+		pi.subscription = other_company_subscription.name
+		self.assertRaisesRegex(frappe.ValidationError, "does not belong to", pi.insert)
+
+	def test_on_submit_refreshes_subscription_for_standard_invoice(self):
+		"""A standard (non-return) submitted invoice must refresh its linked
+		subscription too, not only on return/cancel."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test PI On Submit Plan", cost=100, currency="INR")
+		subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI On Submit Plan", "qty": 1}],
+		)
+
+		self.assertIsNone(subscription.current_invoice_start)
+
+		pi = make_purchase_invoice(
+			supplier="_Test Supplier", parent_cost_center="_Test Cost Center - _TC", do_not_save=True
+		)
+		pi.subscription = subscription.name
+		pi.from_date = "2026-01-01"
+		pi.to_date = "2026-01-31"
+		pi.insert()
+		pi.submit()
+
+		# Refreshing recalculates the subscription's current period from its invoices.
+		subscription.reload()
+		self.assertEqual(getdate(subscription.current_invoice_start), getdate("2026-01-01"))
+		self.assertEqual(getdate(subscription.current_invoice_end), getdate("2026-01-31"))
+
+	def test_on_update_after_submit_refreshes_old_and_new_subscriptions(self):
+		"""subscription is allow_on_submit, so changing it after submit must still
+		refresh both the subscription it was unlinked from and the one it was
+		newly linked to."""
+		from erpnext.accounts.doctype.subscription.test_subscription import create_plan, create_subscription
+
+		create_plan(plan_name="_Test PI Update After Submit Plan", cost=100, currency="INR")
+		old_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI Update After Submit Plan", "qty": 1}],
+		)
+		new_subscription = create_subscription(
+			party_type="Supplier",
+			party="_Test Supplier",
+			plans=[{"plan": "_Test PI Update After Submit Plan", "qty": 1}],
+		)
+
+		pi = make_purchase_invoice(
+			supplier="_Test Supplier", parent_cost_center="_Test Cost Center - _TC", do_not_save=True
+		)
+		pi.subscription = old_subscription.name
+		pi.from_date = "2026-01-01"
+		pi.to_date = "2026-01-31"
+		pi.insert()
+		pi.submit()
+
+		old_subscription.reload()
+		self.assertEqual(getdate(old_subscription.current_invoice_start), getdate("2026-01-01"))
+
+		pi.reload()
+		pi.subscription = new_subscription.name
+		pi.save()
+
+		# The old subscription has lost its only invoice; the new one has gained it.
+		old_subscription.reload()
+		new_subscription.reload()
+		self.assertIsNone(old_subscription.current_invoice_start)
+		self.assertEqual(getdate(new_subscription.current_invoice_start), getdate("2026-01-01"))
+
 
 def set_advance_flag(company, flag, default_account):
 	frappe.db.set_value(

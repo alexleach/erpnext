@@ -1456,9 +1456,11 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "subscription",
    "fieldtype": "Link",
    "label": "Subscription",
+   "link_filters": "[[\"Subscription\", \"company\", \"=\", \"eval:doc.company\"],[\"Subscription\", \"party\", \"=\", \"eval:doc.supplier\"]]",
    "options": "Subscription"
   },
   {
@@ -1696,7 +1698,7 @@
  "idx": 204,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-08-12 12:00:00.000000",
+ "modified": "2026-08-22 20:06:06.110269",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Purchase Invoice",
