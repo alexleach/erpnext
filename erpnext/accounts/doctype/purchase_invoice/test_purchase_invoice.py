@@ -2677,6 +2677,53 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		dr_note = self._create_change_order_debit_note(new_item_rate=300, update_stock=1)
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def test_debit_note_defers_expense_on_the_charge_row_only(self):
+		"""The replacement subscription defers its own expense; only the refunded row is
+		recognised straight away."""
+		deferred_account = create_account(
+			account_name="Deferred Expense",
+			parent_account="Current Assets - _TC",
+			company="_Test Company",
+		)
+
+		item = create_item("_Test Item for Deferred Change Order", is_purchase_item=True)
+		item.enable_deferred_expense = 1
+		item.item_defaults[0].deferred_expense_account = deferred_account
+		item.no_of_months_exp = 12
+		item.save()
+
+		pi = make_purchase_invoice(qty=1, rate=1000)
+
+		dr_note = make_purchase_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=pi.name, do_not_save=True
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": item.name,
+				"qty": 1,
+				"rate": 300,
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+				"enable_deferred_expense": 1,
+				"deferred_expense_account": deferred_account,
+				"service_start_date": nowdate(),
+				"service_end_date": add_days(nowdate(), 365),
+			},
+		)
+		dr_note.save()
+		dr_note.submit()
+
+		entries = frappe.get_all(
+			"GL Entry", filters={"voucher_no": dr_note.name}, fields=["account", "debit", "credit"]
+		)
+		deferred = [d for d in entries if d.account == deferred_account]
+
+		self.assertEqual(len(deferred), 1)
+		self.assertEqual(deferred[0].debit, 300)
+
 	def test_debit_note_without_return_against_requires_a_negative_row(self):
 		dr_note = make_purchase_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
 		self.assertRaises(frappe.ValidationError, dr_note.save)

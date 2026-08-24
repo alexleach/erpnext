@@ -250,7 +250,10 @@ class AccountsController(TransactionBase):
 		if self.doctype in ["Sales Invoice", "Purchase Invoice"]:
 			if self.is_return:
 				self.validate_qty()
-			else:
+
+			# A mixed document carries charge lines of its own, so its deferred fields
+			# still need checking even though the document is a return.
+			if not self.is_return or self.allows_mixed_qty_signs():
 				from erpnext.accounts.services.deferred_accounting import DeferredAccountingService
 
 				deferred_service = DeferredAccountingService(self)

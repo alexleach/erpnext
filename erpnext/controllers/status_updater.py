@@ -263,11 +263,6 @@ class StatusUpdater(Document):
 
 		return {"status": self.status}
 
-	def allows_mixed_qty_signs(self) -> bool:
-		"""On a non-stock invoice a row's sign carries no stock direction, only the
-		direction of the amount, so refund and charge lines may share one document."""
-		return self.doctype in ("Sales Invoice", "Purchase Invoice") and not cint(self.get("update_stock"))
-
 	def validate_qty(self):
 		"""Validates qty at row level"""
 		selling_doctypes = ("Sales Order", "Sales Invoice", "Delivery Note")
@@ -393,6 +388,23 @@ class StatusUpdater(Document):
 
 						elif item[args["target_ref_field"]]:
 							self.check_overflow_with_allowance(item, args)
+
+	def allows_mixed_qty_signs(self) -> bool:
+		"""On a non-stock invoice a row's sign carries no stock direction, only the
+		direction of the amount, so refund and charge lines may share one document."""
+		return self.doctype in ("Sales Invoice", "Purchase Invoice") and not cint(self.get("update_stock"))
+
+	def is_return_row(self, item) -> bool:
+		"""Whether this row reverses an earlier transaction rather than charging for
+		something new. Only a mixed document can hold both kinds at once; anywhere
+		else every row is whatever the document itself is."""
+		if not self.get("is_return"):
+			return False
+
+		if self.allows_mixed_qty_signs():
+			return flt(item.get("qty")) < 0
+
+		return True
 
 	def fetch_items_with_pending_qty(self, args, item_field, items):
 		doctype = frappe.qb.DocType(args["target_dt"])

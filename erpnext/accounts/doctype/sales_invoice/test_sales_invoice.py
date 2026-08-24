@@ -198,6 +198,74 @@ class TestSalesInvoice(ERPNextTestSuite):
 		)
 		self.assertRaises(frappe.ValidationError, cr_note.insert)
 
+	def _make_deferred_change_order_credit_note(self, deferred_account, **args):
+		item = create_item("_Test Item for Deferred Change Order")
+		item.enable_deferred_revenue = 1
+		item.item_defaults[0].deferred_revenue_account = deferred_account
+		item.no_of_months = 12
+		item.save()
+
+		si = create_sales_invoice(qty=1, rate=1000)
+
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": item.name,
+				"qty": 1,
+				"rate": 300,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"enable_deferred_revenue": 1,
+				"deferred_revenue_account": deferred_account,
+				"service_start_date": args.get("service_start_date"),
+				"service_end_date": args.get("service_end_date"),
+			},
+		)
+		return cr_note
+
+	def test_credit_note_defers_revenue_on_the_charge_row_only(self):
+		"""The replacement subscription defers its own revenue; only the refunded row is
+		recognised straight away."""
+		deferred_account = create_account(
+			account_name="Deferred Revenue",
+			parent_account="Current Liabilities - _TC",
+			company="_Test Company",
+		)
+		cr_note = self._make_deferred_change_order_credit_note(
+			deferred_account,
+			service_start_date=nowdate(),
+			service_end_date=add_days(nowdate(), 365),
+		)
+		cr_note.insert()
+		cr_note.submit()
+
+		entries = frappe.get_all(
+			"GL Entry", filters={"voucher_no": cr_note.name}, fields=["account", "debit", "credit"]
+		)
+		deferred = [d for d in entries if d.account == deferred_account]
+		income = [d for d in entries if d.account == "Sales - _TC"]
+
+		self.assertEqual(len(deferred), 1)
+		self.assertEqual(deferred[0].credit, 300)
+		self.assertEqual(income[0].debit, 1000)
+
+	def test_credit_note_validates_service_period_on_the_charge_row(self):
+		"""Deferred fields on a mixed document are checked even though it is a return: a
+		service period that ended before the posting date is still rejected."""
+		deferred_account = create_account(
+			account_name="Deferred Revenue",
+			parent_account="Current Liabilities - _TC",
+			company="_Test Company",
+		)
+		cr_note = self._make_deferred_change_order_credit_note(
+			deferred_account, service_start_date=add_days(nowdate(), -400)
+		)
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
 	def test_credit_note_without_return_against_requires_a_negative_row(self):
 		cr_note = create_sales_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
 		self.assertRaises(frappe.ValidationError, cr_note.insert)
