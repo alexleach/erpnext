@@ -105,10 +105,11 @@ def prepare_invoice(invoice, progressive_number):
 
 
 def get_type_of_document(invoice) -> str:
-	"""The revenue agency is told what the document does, not which flag it carries. A
-	change order raised as a return can still net positive, and what it bills is an
-	invoice."""
-	if flt(invoice.base_grand_total) < 0:
+	"""A credit note names the invoice it corrects and actually credits it. A change
+	order raised as a return can still net positive, and what it bills is an invoice."""
+	corrects_an_invoice = invoice.is_return and invoice.return_against
+
+	if corrects_an_invoice and flt(invoice.base_grand_total) < 0:
 		return "TD04"  # Credit Note (Nota di Credito)
 
 	return "TD01"  # Sales Invoice (Fattura)
