@@ -57,13 +57,12 @@ def prepare_invoice(invoice, progressive_number):
 
 	# Set invoice type
 	if not invoice.type_of_document:
+		invoice.type_of_document = get_type_of_document(invoice)
+
 		if invoice.is_return and invoice.return_against:
-			invoice.type_of_document = "TD04"  # Credit Note (Nota di Credito)
 			invoice.return_against_unamended = get_unamended_name(
 				frappe.get_doc("Sales Invoice", invoice.return_against)
 			)
-		else:
-			invoice.type_of_document = "TD01"  # Sales Invoice (Fattura)
 
 	# set customer information
 	invoice.customer_data = frappe.get_doc("Customer", invoice.customer)
@@ -101,6 +100,16 @@ def prepare_invoice(invoice, progressive_number):
 	invoice.customer_po_data = customer_po_data
 
 	return invoice
+
+
+def get_type_of_document(invoice) -> str:
+	"""The revenue agency is told what the document does, not which flag it carries. A
+	change order raised as a return can still net positive, and what it bills is an
+	invoice."""
+	if flt(invoice.base_grand_total) < 0:
+		return "TD04"  # Credit Note (Nota di Credito)
+
+	return "TD01"  # Sales Invoice (Fattura)
 
 
 def get_conditions(filters):

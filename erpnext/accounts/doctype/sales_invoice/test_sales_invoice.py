@@ -198,6 +198,14 @@ class TestSalesInvoice(ERPNextTestSuite):
 		)
 		self.assertRaises(frappe.ValidationError, cr_note.insert)
 
+	def test_credit_note_requires_a_source_for_each_refund_row_when_mixed(self):
+		"""A charge line can be for something new, but a refund line has to say what it
+		reverses."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.items[0].sales_invoice_item = None
+
+		self.assertRaisesRegex(frappe.ValidationError, "must reference the Sales Invoice row", cr_note.insert)
+
 	def test_credit_note_bills_the_order_its_charge_row_came_from(self):
 		"""A charge line pulled from a change order bills that order, even though the
 		document as a whole is a return."""

@@ -8,6 +8,7 @@ import frappe
 from erpnext.regional.italy.utils import (
 	append_row_as_charges,
 	get_conditions,
+	get_type_of_document,
 	get_unamended_name,
 	update_summary_details,
 )
@@ -16,6 +17,16 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 class TestItalyUtils(ERPNextTestSuite):
 	"""Pure helpers behind the Italian e-invoice export."""
+
+	def test_get_type_of_document_follows_the_net_total(self):
+		"""The document type is reported to the revenue agency, so it must describe what
+		the document does rather than which flag it carries."""
+		self.assertEqual(get_type_of_document(frappe._dict(base_grand_total=1000)), "TD01")
+		self.assertEqual(get_type_of_document(frappe._dict(base_grand_total=-700)), "TD04")
+
+		# a change order raised as a return, netting positive: it bills, so it is an invoice
+		self.assertEqual(get_type_of_document(frappe._dict(base_grand_total=500, is_return=1)), "TD01")
+		self.assertEqual(get_type_of_document(frappe._dict(base_grand_total=-500, is_return=1)), "TD04")
 
 	def test_get_conditions_builds_filter_map(self):
 		base = get_conditions({})

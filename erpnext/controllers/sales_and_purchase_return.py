@@ -23,12 +23,29 @@ def validate_return(doc):
 	if not doc.meta.get_field("is_return") or not doc.is_return:
 		return
 
+	if doc.has_mixed_qty_signs():
+		validate_refund_lines_have_a_source(doc)
+
 	if doc.return_against:
 		validate_return_against(doc)
 
 		validate_returned_items(doc)
 	elif doc.allows_mixed_qty_signs() and not any(flt(d.qty) < 0 for d in doc.get("items")):
 		frappe.throw(_("At least one item should be entered with negative quantity in return document"))
+
+
+def validate_refund_lines_have_a_source(doc):
+	"""A charge line on a mixed document may be for something new, but a refund line has
+	to say what it reverses, or the document credits something that was never billed."""
+	link_field = get_return_against_item_fields(doc.doctype)
+
+	for item in doc.get("items"):
+		if flt(item.qty) < 0 and not item.get(link_field):
+			frappe.throw(
+				_("Row #{0}: Refunded item {1} must reference the {2} row it is returned against").format(
+					item.idx, frappe.bold(item.item_code), doc.doctype
+				)
+			)
 
 
 def validate_return_against(doc):
