@@ -406,6 +406,16 @@ class StatusUpdater(Document):
 
 		return True
 
+	def has_mixed_qty_signs(self) -> bool:
+		"""Whether this document actually holds both refund and charge lines, rather than
+		merely being allowed to."""
+		if not self.allows_mixed_qty_signs():
+			return False
+
+		quantities = [flt(d.get("qty")) for d in self.get("items") or []]
+
+		return any(qty > 0 for qty in quantities) and any(qty < 0 for qty in quantities)
+
 	def fetch_items_with_pending_qty(self, args, item_field, items):
 		doctype = frappe.qb.DocType(args["target_dt"])
 		item_field_col = doctype[item_field]

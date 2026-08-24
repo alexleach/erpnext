@@ -198,6 +198,73 @@ class TestSalesInvoice(ERPNextTestSuite):
 		)
 		self.assertRaises(frappe.ValidationError, cr_note.insert)
 
+	def test_is_return_row_reads_the_row_not_the_document(self):
+		"""On a mixed document each row answers for itself; anywhere else the document
+		answers for every row."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		self.assertTrue(cr_note.is_return_row(cr_note.items[0]))
+		self.assertFalse(cr_note.is_return_row(cr_note.items[1]))
+
+		si = create_sales_invoice(qty=1, rate=1000, do_not_save=True)
+		self.assertFalse(si.is_return_row(si.items[0]))
+
+		stock_return = create_sales_invoice(qty=-1, rate=1000, is_return=1, update_stock=1, do_not_save=True)
+		self.assertTrue(stock_return.is_return_row(stock_return.items[0]))
+
+	def test_credit_note_rejects_zero_qty_row_when_signs_are_mixed(self):
+		"""A zero-quantity line has no sign, so it cannot say whether it is a refund or
+		a charge on a document carrying both."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
+	def test_credit_note_still_allows_zero_qty_row_when_signs_are_not_mixed(self):
+		"""An ordinary credit note has an unambiguous direction, so zero-quantity lines
+		keep working there."""
+		si = create_sales_invoice(qty=1, rate=1000)
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		cr_note.insert()
+
+		self.assertEqual(cr_note.items[1].amount, -50)
+
+	def test_credit_note_rejects_fixed_asset_row_when_signs_are_mixed(self):
+		"""Asset disposal and status are decided for the whole document, so an asset
+		cannot be billed on one that mixes directions."""
+		from erpnext.accounts.doctype.sales_invoice.services.fixed_assets import FixedAssetService
+
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.items[1].is_fixed_asset = 1
+		cr_note.items[1].asset = "_Test Asset for Change Order"
+
+		self.assertRaisesRegex(
+			frappe.ValidationError,
+			"mixes returned and charged",
+			FixedAssetService(cr_note).validate_fixed_asset,
+		)
+
 	def _make_deferred_change_order_credit_note(self, deferred_account, **args):
 		item = create_item("_Test Item for Deferred Change Order")
 		item.enable_deferred_revenue = 1

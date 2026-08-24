@@ -230,6 +230,10 @@ class AccountsController(TransactionBase):
 	def validate(self):
 		if not self.get("is_return") and not self.get("is_debit_note"):
 			self.validate_qty_is_not_zero()
+		elif self.has_mixed_qty_signs():
+			# A zero-quantity line carries no sign, so on a document holding both refunds
+			# and charges there is nothing left to say which of the two it is.
+			self.validate_qty_is_not_zero()
 
 		if (
 			self.doctype in ["Sales Invoice", "Purchase Invoice", "POS Invoice"]
