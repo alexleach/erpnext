@@ -434,8 +434,10 @@ class SalesInvoice(SellingController):
 		self.check_prev_docstatus()
 
 		if self.is_return and not self.update_billed_amount_in_sales_order:
-			# NOTE status updating bypassed for is_return
-			self.status_updater = []
+			# A mixed document also carries charge lines, and those must bill the order
+			# they were pulled from, so only a pure return bypasses the update.
+			if not self.has_mixed_qty_signs():
+				self.status_updater = []
 
 		SalesTaxWithholding(self).on_submit()
 
@@ -524,8 +526,10 @@ class SalesInvoice(SellingController):
 		self.check_sales_order_on_hold_or_close("sales_order")
 
 		if self.is_return and not self.update_billed_amount_in_sales_order:
-			# NOTE status updating bypassed for is_return
-			self.status_updater = []
+			# A mixed document also carries charge lines, and those must bill the order
+			# they were pulled from, so only a pure return bypasses the update.
+			if not self.has_mixed_qty_signs():
+				self.status_updater = []
 
 		self.update_status_updater_args()
 		self.update_prevdoc_status()

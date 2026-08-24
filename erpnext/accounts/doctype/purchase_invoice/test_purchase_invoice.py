@@ -2677,6 +2677,41 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		dr_note = self._create_change_order_debit_note(new_item_rate=300, update_stock=1)
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def test_debit_note_bills_the_order_its_charge_row_came_from(self):
+		"""A charge line pulled from a change order bills that order, even though the
+		document as a whole is a return."""
+		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
+
+		pi = make_purchase_invoice(qty=1, rate=1000)
+		change_po = create_purchase_order(item_code="_Test Item 2", qty=1, rate=300)
+
+		dr_note = make_purchase_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=pi.name, do_not_save=True
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 300,
+				"warehouse": "_Test Warehouse - _TC",
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+				"purchase_order": change_po.name,
+				"po_detail": change_po.items[0].name,
+			},
+		)
+		dr_note.save()
+		dr_note.submit()
+
+		change_po.reload()
+		billed_amt = frappe.db.get_value("Purchase Order Item", change_po.items[0].name, "billed_amt")
+
+		self.assertEqual(change_po.per_billed, 100)
+		self.assertEqual(billed_amt, 300)
+
 	def test_debit_note_defers_expense_on_the_charge_row_only(self):
 		"""The replacement subscription defers its own expense; only the refunded row is
 		recognised straight away."""

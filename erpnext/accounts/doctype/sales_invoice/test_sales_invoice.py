@@ -198,6 +198,39 @@ class TestSalesInvoice(ERPNextTestSuite):
 		)
 		self.assertRaises(frappe.ValidationError, cr_note.insert)
 
+	def test_credit_note_bills_the_order_its_charge_row_came_from(self):
+		"""A charge line pulled from a change order bills that order, even though the
+		document as a whole is a return."""
+		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+
+		si = create_sales_invoice(qty=1, rate=1000)
+		change_so = make_sales_order(item_code="_Test Item 2", qty=1, rate=300)
+
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 300,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"sales_order": change_so.name,
+				"so_detail": change_so.items[0].name,
+			},
+		)
+		cr_note.insert()
+		cr_note.submit()
+
+		change_so.reload()
+		billed_amt = frappe.db.get_value("Sales Order Item", change_so.items[0].name, "billed_amt")
+
+		self.assertEqual(change_so.per_billed, 100)
+		self.assertEqual(billed_amt, 300)
+
 	def test_is_return_row_reads_the_row_not_the_document(self):
 		"""On a mixed document each row answers for itself; anywhere else the document
 		answers for every row."""
