@@ -317,7 +317,11 @@ class PurchaseInvoiceGLComposer(BaseGLComposer):
 						)
 
 				else:
-					expense_account = self._get_item_expense_account(item)
+					expense_account = (
+						item.expense_account
+						if (not item.enable_deferred_expense or doc.is_return_row(item))
+						else item.deferred_expense_account
+					)
 					account_currency = get_account_currency(expense_account)
 					amount, base_amount = tax_service.get_amount_and_base_amount(item, None)
 
@@ -436,14 +440,6 @@ class PurchaseInvoiceGLComposer(BaseGLComposer):
 
 			if item.is_fixed_asset and item.landed_cost_voucher_amount:
 				self.update_net_purchase_amount_for_linked_assets(item)
-
-	def _get_item_expense_account(self, item) -> str:
-		"""A refund line reverses an expense that was already deferred by the invoice it
-		reverses, so it posts to the expense account directly. Only a charge line defers."""
-		if not item.enable_deferred_expense or self.doc.is_return_row(item):
-			return item.expense_account
-
-		return item.deferred_expense_account
 
 	def get_provisional_accounts(self):
 		doc = self.doc

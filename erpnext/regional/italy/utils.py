@@ -59,10 +59,12 @@ def prepare_invoice(invoice, progressive_number):
 	if not invoice.type_of_document:
 		invoice.type_of_document = get_type_of_document(invoice)
 
-		if invoice.is_return and invoice.return_against:
-			invoice.return_against_unamended = get_unamended_name(
-				frappe.get_doc("Sales Invoice", invoice.return_against)
-			)
+	# the reference to the invoice being corrected does not depend on how the type was
+	# arrived at, so it is set even when the type was already filled in
+	if invoice.is_return and invoice.return_against:
+		invoice.return_against_unamended = get_unamended_name(
+			frappe.get_doc("Sales Invoice", invoice.return_against)
+		)
 
 	# set customer information
 	invoice.customer_data = frappe.get_doc("Customer", invoice.customer)

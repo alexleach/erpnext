@@ -117,7 +117,11 @@ class SalesInvoiceGLComposer(BaseGLComposer):
 	def _append_item_discount_gl_entries(self, item, gl_entries) -> None:
 		doc = self.doc
 		discount_amount = item.discount_amount * item.qty
-		income_account = self._get_item_income_account(item)
+		income_account = (
+			item.income_account
+			if (not item.enable_deferred_revenue or doc.is_return_row(item))
+			else item.deferred_revenue_account
+		)
 
 		account_currency = get_account_currency(item.discount_account)
 		gl_entries.append(
@@ -370,17 +374,13 @@ class SalesInvoiceGLComposer(BaseGLComposer):
 		if cint(doc.update_stock) and erpnext.is_perpetual_inventory_enabled(doc.company):
 			gl_entries += super(SalesInvoice, doc).get_gl_entries()
 
-	def _get_item_income_account(self, item) -> str:
-		"""A refund line reverses revenue that was already deferred by the invoice it
-		reverses, so it posts to income directly. Only a charge line defers."""
-		if not item.enable_deferred_revenue or self.doc.is_return_row(item):
-			return item.income_account
-
-		return item.deferred_revenue_account
-
 	def _append_item_income_gl_entry(self, item, gl_entries, tax_service, enable_discount_accounting) -> None:
 		doc = self.doc
-		income_account = self._get_item_income_account(item)
+		income_account = (
+			item.income_account
+			if (not item.enable_deferred_revenue or doc.is_return_row(item))
+			else item.deferred_revenue_account
+		)
 
 		amount, base_amount = tax_service.get_amount_and_base_amount(item, enable_discount_accounting)
 

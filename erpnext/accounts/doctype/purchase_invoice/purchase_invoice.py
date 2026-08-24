@@ -660,11 +660,7 @@ class PurchaseInvoice(BuyingController):
 
 		self.check_prev_docstatus()
 
-		if self.is_return and not self.update_billed_amount_in_purchase_order:
-			# A mixed document also carries charge lines, and those must bill the order
-			# they were pulled from, so only a pure return bypasses the update.
-			if not self.has_mixed_qty_signs():
-				self.status_updater = []
+		self.clear_status_updater_for_pure_return()
 
 		self.update_status_updater_args()
 		self.update_prevdoc_status()
@@ -776,11 +772,7 @@ class PurchaseInvoice(BuyingController):
 
 		self.check_purchase_order_on_hold_or_close("purchase_order", exclude_if_field="purchase_receipt")
 
-		if self.is_return and not self.update_billed_amount_in_purchase_order:
-			# A mixed document also carries charge lines, and those must bill the order
-			# they were pulled from, so only a pure return bypasses the update.
-			if not self.has_mixed_qty_signs():
-				self.status_updater = []
+		self.clear_status_updater_for_pure_return()
 
 		self.update_status_updater_args()
 		self.update_prevdoc_status()

@@ -74,6 +74,12 @@ force_item_fields = (
 )
 
 
+BILLED_AMOUNT_OPT_IN_FIELD = {
+	"Sales Invoice": "update_billed_amount_in_sales_order",
+	"Purchase Invoice": "update_billed_amount_in_purchase_order",
+}
+
+
 class AccountsController(TransactionBase):
 	def get_print_settings(self):
 		print_setting_fields = []
@@ -226,6 +232,21 @@ class AccountsController(TransactionBase):
 			return bool(frappe.get_single_value("Buying Settings", "allow_negative_rates_for_items"))
 
 		return False
+
+	def clear_status_updater_for_pure_return(self) -> None:
+		"""A pure return leaves the order's billed amount alone unless the user opts in.
+		A mixed document also carries charge lines, and those must bill the order they
+		were pulled from, so it never bypasses the update."""
+		if not self.is_return:
+			return
+
+		if self.get(BILLED_AMOUNT_OPT_IN_FIELD[self.doctype]):
+			return
+
+		if self.has_mixed_qty_signs():
+			return
+
+		self.status_updater = []
 
 	def validate(self):
 		if not self.get("is_return") and not self.get("is_debit_note"):
