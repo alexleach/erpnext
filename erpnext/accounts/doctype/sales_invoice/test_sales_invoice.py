@@ -173,9 +173,10 @@ class TestSalesInvoice(ERPNextTestSuite):
 
 	def test_credit_note_with_update_stock_rejects_mixed_qty_signs(self):
 		"""On a stock-bearing invoice the sign of qty also picks the direction of the
-		Stock Ledger Entry."""
+		Stock Ledger Entry. The message has to name Update Stock, since unticking it is
+		what lifts the restriction."""
 		cr_note = self._make_change_order_credit_note(new_item_rate=300, update_stock=1)
-		self.assertRaises(frappe.ValidationError, cr_note.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "Update Stock", cr_note.insert)
 
 	def test_credit_note_rejects_positive_qty_on_row_linked_to_return_against(self):
 		"""Mixing signs must not inflate the return of an existing line."""

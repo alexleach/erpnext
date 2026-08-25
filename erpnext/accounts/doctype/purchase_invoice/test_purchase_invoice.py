@@ -2677,6 +2677,38 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 		dr_note = self._create_change_order_debit_note(new_item_rate=300, update_stock=1)
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def test_debit_note_rejects_fixed_asset_row_when_signs_are_mixed(self):
+		"""Asset handling is decided for the document as a whole - `on_submit` skips it
+		for a return - so an asset cannot be billed on one that mixes directions."""
+		from erpnext.assets.doctype.asset.test_asset import (
+			create_asset_category,
+			create_fixed_asset_item,
+		)
+
+		if not frappe.db.exists("Asset Category", "Computers"):
+			create_asset_category()
+		asset_item = create_fixed_asset_item("_Test Mixed Sign Asset Item")
+
+		pi = make_purchase_invoice(qty=1, rate=1000)
+
+		dr_note = make_purchase_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=pi.name, do_not_save=True
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": asset_item.name,
+				"qty": 1,
+				"rate": 300,
+				"warehouse": "_Test Warehouse - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+			},
+		)
+
+		self.assertRaisesRegex(frappe.ValidationError, "mixes returned and charged", dr_note.save)
+
 	def test_debit_note_bills_the_order_its_charge_row_came_from(self):
 		"""A charge line pulled from a change order bills that order, even though the
 		document as a whole is a return."""

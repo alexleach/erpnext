@@ -269,6 +269,14 @@ class StatusUpdater(Document):
 		buying_doctypes = ("Purchase Order", "Purchase Invoice", "Purchase Receipt")
 		mixed_qty_signs_allowed = self.allows_mixed_qty_signs()
 
+		# unticking Update Stock is what lifts the rule, but only an invoice has one to
+		# untick, so only an invoice is told about it
+		update_stock_hint = ""
+		if self.doctype in ("Sales Invoice", "Purchase Invoice"):
+			update_stock_hint = "<br><br>" + _(
+				"Positive and negative quantities can only be mixed on the same invoice while {0} is unchecked."
+			).format(frappe.bold(_("Update Stock")))
+
 		for args in self.status_updater:
 			if "target_ref_field" not in args or args.get("validate_qty") is False:
 				# if target_ref_field is not specified or validate_qty is explicitly set to False, skip validation
@@ -294,11 +302,13 @@ class StatusUpdater(Document):
 					if flt(d.qty) < 0 and not self.get("is_return"):
 						frappe.throw(
 							_("For an item {0}, quantity must be a positive number").format(d.item_code)
+							+ update_stock_hint
 						)
 
 					if flt(d.qty) > 0 and self.get("is_return"):
 						frappe.throw(
 							_("For an item {0}, quantity must be a negative number").format(d.item_code)
+							+ update_stock_hint
 						)
 
 				if (not selling_negative_rate_allowed and self.doctype in selling_doctypes) or (
