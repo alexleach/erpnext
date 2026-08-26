@@ -411,9 +411,9 @@ class StatusUpdater(Document):
 		if not self.get("is_return"):
 			return False
 
-		# only a document actually holding both kinds needs asking row by row; anywhere
-		# else the document answers for every row, including one with no sign of its own
-		if self.has_mixed_qty_signs():
+		# a row states its own direction through the sign of its quantity; one with no
+		# quantity states nothing, so there the document still answers
+		if self.allows_mixed_qty_signs() and flt(item.get("qty")):
 			return flt(item.get("qty")) < 0
 
 		return True
