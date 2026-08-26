@@ -411,7 +411,9 @@ class StatusUpdater(Document):
 		if not self.get("is_return"):
 			return False
 
-		if self.allows_mixed_qty_signs():
+		# only a document actually holding both kinds needs asking row by row; anywhere
+		# else the document answers for every row, including one with no sign of its own
+		if self.has_mixed_qty_signs():
 			return flt(item.get("qty")) < 0
 
 		return True

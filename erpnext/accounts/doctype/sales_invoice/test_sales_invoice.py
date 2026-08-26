@@ -253,6 +253,21 @@ class TestSalesInvoice(ERPNextTestSuite):
 		stock_return = create_sales_invoice(qty=-1, rate=1000, is_return=1, update_stock=1, do_not_save=True)
 		self.assertTrue(stock_return.is_return_row(stock_return.items[0]))
 
+		# a zero-quantity row has no sign of its own, so on a credit note that is not
+		# actually mixed the document still answers for it
+		plain_return = create_sales_invoice(qty=-1, rate=1000, is_return=1, do_not_save=True)
+		plain_return.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		self.assertTrue(plain_return.is_return_row(plain_return.items[1]))
+
 	def test_credit_note_rejects_zero_qty_row_when_signs_are_mixed(self):
 		"""A zero-quantity line has no sign, so it cannot say whether it is a refund or
 		a charge on a document carrying both."""
