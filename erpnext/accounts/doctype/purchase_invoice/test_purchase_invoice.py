@@ -2709,6 +2709,23 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		self.assertRaisesRegex(frappe.ValidationError, "mixes returned and charged", dr_note.save)
 
+	def test_debit_note_keeps_its_own_outstanding_when_signs_are_mixed(self):
+		"""Only part of a mixed document belongs to the invoice it returns against, so its
+		net cannot settle that invoice, however the checkbox is left."""
+		dr_note = self._create_change_order_debit_note(new_item_rate=300)
+		dr_note.update_outstanding_for_self = 0
+		dr_note.save()
+		dr_note.submit()
+		dr_note.reload()
+
+		against_outstanding = frappe.db.get_value(
+			"Purchase Invoice", dr_note.return_against, "outstanding_amount"
+		)
+
+		self.assertEqual(dr_note.update_outstanding_for_self, 1)
+		self.assertEqual(dr_note.outstanding_amount, -700)
+		self.assertEqual(against_outstanding, 1000)
+
 	def test_debit_note_bills_the_order_its_charge_row_came_from(self):
 		"""A charge line pulled from a change order bills that order, even though the
 		document as a whole is a return."""

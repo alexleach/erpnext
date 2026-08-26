@@ -197,6 +197,18 @@ class AccountsController(TransactionBase):
 					frappe.bold(_("Update Outstanding for Self")),
 				)
 
+			elif self.has_mixed_qty_signs():
+				# only part of a mixed document belongs to the invoice
+				# `return_against` points at, so its net cannot be set against
+				# that invoice
+				self.update_outstanding_for_self = 1
+				msg = _(
+					"{0} charges for items of its own as well as returning others, so its total does not belong to {1}. Updating the outstanding to this invoice."
+				).format(
+					frappe.bold(document_type),
+					get_link_to_form(self.doctype, self.get("return_against")),
+				)
+
 			elif not self.update_outstanding_for_self and (
 				abs(flt(self.rounded_total) or flt(self.grand_total)) > flt(against_voucher_outstanding)
 			):
