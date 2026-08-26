@@ -375,7 +375,12 @@ class TestSalesInvoice(ERPNextTestSuite):
 
 		self.assertEqual(len(deferred), 1)
 		self.assertEqual(deferred[0].credit, 300)
+
+		# the refunded row reverses in full and the replacement recognises nothing now,
+		# so income carries the reversal alone
+		self.assertEqual(len(income), 1)
 		self.assertEqual(income[0].debit, 1000)
+		self.assertEqual(income[0].credit, 0)
 
 	def test_credit_note_validates_service_period_on_the_charge_row(self):
 		"""Deferred fields on a mixed document are checked even though it is a return: a
@@ -386,9 +391,11 @@ class TestSalesInvoice(ERPNextTestSuite):
 			company="_Test Company",
 		)
 		cr_note = self._make_deferred_change_order_credit_note(
-			deferred_account, service_start_date=add_days(nowdate(), -400)
+			deferred_account,
+			service_start_date=add_days(nowdate(), -400),
+			service_end_date=add_days(nowdate(), -1),
 		)
-		self.assertRaises(frappe.ValidationError, cr_note.insert)
+		self.assertRaisesRegex(frappe.ValidationError, "Service End Date cannot be before", cr_note.insert)
 
 	def test_credit_note_without_return_against_requires_a_negative_row(self):
 		cr_note = create_sales_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
