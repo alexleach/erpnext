@@ -2604,6 +2604,34 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def test_debit_note_rejects_zero_qty_on_a_row_linked_to_the_original(self):
+		"""How much of a row has been returned is measured by quantity, so a linked row
+		returning nothing would debit its value without consuming any of what it points
+		at, and could be repeated without limit."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		pi = make_purchase_invoice(qty=10, rate=100, do_not_save=True)
+		pi.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 1000,
+				"warehouse": "_Test Warehouse - _TC",
+				"conversion_factor": 1.0,
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		pi.insert()
+		pi.submit()
+
+		dr_note = make_return_doc("Purchase Invoice", pi.name)
+		dr_note.items[0].qty = -1
+		dr_note.items[1].qty = 0
+
+		self.assertRaisesRegex(frappe.ValidationError, "cannot be zero for Item", dr_note.insert)
+
 	def test_debit_note_without_item(self):
 		pi = make_purchase_invoice(item_name="_Test Item", qty=10, do_not_submit=True)
 		pi.items[0].item_code = ""

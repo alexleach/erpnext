@@ -241,6 +241,16 @@ def validate_quantity(doc, key, args, ref, valid_items, already_returned_items):
 				frappe.throw(
 					_("Item {0} has already been returned").format(args.item_code), StockOverReturnError
 				)
+			elif (
+				column in ("qty", "stock_qty")
+				and not args.get("return_qty_from_rejected_warehouse")
+				and not flt(args.get(column))
+			):
+				# consumption of the source row is measured by quantity, so a row
+				# returning nothing would leave it wholly available to return again
+				frappe.throw(
+					_("Row # {0}: {1} cannot be zero for Item {2}").format(args.idx, label, args.item_code)
+				)
 			elif abs(flt(current_stock_qty, field_precision)) > max_returnable_qty:
 				frappe.throw(
 					_("Row # {0}: Cannot return more than {1} for Item {2}").format(

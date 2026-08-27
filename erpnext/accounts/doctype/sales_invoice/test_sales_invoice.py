@@ -122,6 +122,54 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.append("items", {"item_code": "_Test Item 2", "qty": 1, "rate": -150})
 		self.assertRaises(frappe.ValidationError, si.save)
 
+	def test_credit_note_rejects_zero_qty_on_a_row_linked_to_the_original(self):
+		"""How much of a row has been returned is measured by quantity, so a linked row
+		returning nothing would credit its value without consuming any of what it points
+		at, and could be repeated without limit."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = create_sales_invoice(qty=10, rate=100, do_not_save=True)
+		si.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 1000,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		si.insert()
+		si.submit()
+
+		cr_note = make_return_doc("Sales Invoice", si.name)
+		cr_note.items[0].qty = -1
+		cr_note.items[1].qty = 0
+
+		self.assertRaisesRegex(frappe.ValidationError, "cannot be zero for Item", cr_note.insert)
+
+	def test_credit_note_allows_zero_qty_on_a_row_of_its_own(self):
+		"""A row that points at nothing has no returnable quantity to consume, so a
+		value-only adjustment beside a return keeps working."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = create_sales_invoice(qty=10, rate=100)
+
+		cr_note = make_return_doc("Sales Invoice", si.name)
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		cr_note.insert()
+
+		self.assertEqual(cr_note.items[-1].amount, -50)
+
 	def test_timestamp_change(self):
 		w = frappe.copy_doc(self.globalTestRecords["Sales Invoice"][0])
 		w.docstatus = 0
