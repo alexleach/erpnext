@@ -52,6 +52,7 @@ class BuyingController(SubcontractingController):
 		self.validate_from_warehouse()
 		self.set_supplier_address()
 		self.validate_asset_return()
+		self.validate_fixed_asset_on_mixed_document()
 		self.validate_auto_repeat_subscription_dates()
 		self.create_package_for_transfer()
 
@@ -263,6 +264,22 @@ class BuyingController(SubcontractingController):
 				d.category = "Total"
 
 			msgprint(msg)
+
+	def validate_fixed_asset_on_mixed_document(self) -> None:
+		"""Asset handling is decided for the document as a whole: `on_submit` skips it
+		entirely for a return, and `process_fixed_asset` gates on `update_stock`. Neither
+		can describe a document that both buys an asset and returns one."""
+		if not self.has_mixed_qty_signs():
+			return
+
+		for item in self.get("items"):
+			if item.is_fixed_asset:
+				frappe.throw(
+					_(
+						"Row #{0}: Asset item {1} cannot be billed on a document that mixes returned and charged quantities"
+					).format(item.idx, frappe.bold(item.item_code)),
+					title=_("Asset on Mixed Document"),
+				)
 
 	def validate_asset_return(self):
 		if self.doctype not in ["Purchase Receipt", "Purchase Invoice"] or not self.is_return:

@@ -122,6 +122,285 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.append("items", {"item_code": "_Test Item 2", "qty": 1, "rate": -150})
 		self.assertRaises(frappe.ValidationError, si.save)
 
+	def _make_change_order_credit_note(self, new_item_rate, **args):
+		"""A change order as one credit note: the remainder of the old subscription is
+		refunded (negative qty) and the replacement charged on the same document."""
+		si = create_sales_invoice(qty=1, rate=1000, update_stock=args.get("update_stock"))
+
+		cr_note = create_sales_invoice(
+			qty=-1,
+			rate=1000,
+			is_return=1,
+			return_against=si.name,
+			update_stock=args.get("update_stock"),
+			do_not_save=True,
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": new_item_rate,
+				"warehouse": "_Test Warehouse - _TC",
+				"income_account": "Sales - _TC",
+				"expense_account": "Cost of Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		return cr_note
+
+	def test_credit_note_allows_mixed_qty_signs_on_downgrade(self):
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.insert()
+		cr_note.submit()
+		cr_note.reload()
+
+		self.assertEqual(cr_note.grand_total, -700)
+		self.assertEqual(cr_note.outstanding_amount, -700)
+		self.assertEqual(cr_note.status, "Return")
+
+	def test_credit_note_allows_mixed_qty_signs_on_upgrade(self):
+		"""An upgrade nets positive; the net sign does not decide whether the rows may
+		be mixed."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=1500)
+		cr_note.insert()
+		cr_note.submit()
+		cr_note.reload()
+
+		self.assertEqual(cr_note.grand_total, 500)
+		self.assertEqual(cr_note.outstanding_amount, 500)
+
+	def test_credit_note_with_update_stock_rejects_mixed_qty_signs(self):
+		"""On a stock-bearing invoice the sign of qty also picks the direction of the
+		Stock Ledger Entry. The message has to name Update Stock, since unticking it is
+		what lifts the restriction."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300, update_stock=1)
+		self.assertRaisesRegex(frappe.ValidationError, "Update Stock", cr_note.insert)
+
+	def test_credit_note_rejects_positive_qty_on_row_linked_to_return_against(self):
+		"""Mixing signs must not inflate the return of an existing line."""
+		si = create_sales_invoice(qty=1, rate=1000)
+
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item",
+				"qty": 1,
+				"rate": 100,
+				"sales_invoice_item": si.items[0].name,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
+	def test_credit_note_requires_a_source_for_each_refund_row_when_mixed(self):
+		"""A charge line can be for something new, but a refund line has to say what it
+		reverses."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.items[0].sales_invoice_item = None
+
+		self.assertRaisesRegex(frappe.ValidationError, "must reference the Sales Invoice row", cr_note.insert)
+
+	def test_credit_note_bills_the_order_its_charge_row_came_from(self):
+		"""A charge line pulled from a change order bills that order, even though the
+		document as a whole is a return."""
+		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+
+		si = create_sales_invoice(qty=1, rate=1000)
+		change_so = make_sales_order(item_code="_Test Item 2", qty=1, rate=300)
+
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 300,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"sales_order": change_so.name,
+				"so_detail": change_so.items[0].name,
+			},
+		)
+		cr_note.insert()
+		cr_note.submit()
+
+		change_so.reload()
+		billed_amt = frappe.db.get_value("Sales Order Item", change_so.items[0].name, "billed_amt")
+
+		self.assertEqual(change_so.per_billed, 100)
+		self.assertEqual(billed_amt, 300)
+
+	def test_is_return_row_reads_the_row_not_the_document(self):
+		"""On a mixed document each row answers for itself; anywhere else the document
+		answers for every row."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		self.assertTrue(cr_note.is_return_row(cr_note.items[0]))
+		self.assertFalse(cr_note.is_return_row(cr_note.items[1]))
+
+		si = create_sales_invoice(qty=1, rate=1000, do_not_save=True)
+		self.assertFalse(si.is_return_row(si.items[0]))
+
+		stock_return = create_sales_invoice(qty=-1, rate=1000, is_return=1, update_stock=1, do_not_save=True)
+		self.assertTrue(stock_return.is_return_row(stock_return.items[0]))
+
+		# a zero-quantity row has no sign of its own, so on a credit note that is not
+		# actually mixed the document still answers for it
+		plain_return = create_sales_invoice(qty=-1, rate=1000, is_return=1, do_not_save=True)
+		plain_return.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		self.assertTrue(plain_return.is_return_row(plain_return.items[1]))
+
+	def test_credit_note_rejects_zero_qty_row_when_signs_are_mixed(self):
+		"""A zero-quantity line has no sign, so it cannot say whether it is a refund or
+		a charge on a document carrying both."""
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
+	def test_credit_note_still_allows_zero_qty_row_when_signs_are_not_mixed(self):
+		"""An ordinary credit note has an unambiguous direction, so zero-quantity lines
+		keep working there."""
+		si = create_sales_invoice(qty=1, rate=1000)
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 0,
+				"rate": 50,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		cr_note.insert()
+
+		self.assertEqual(cr_note.items[1].amount, -50)
+
+	def test_credit_note_rejects_fixed_asset_row_when_signs_are_mixed(self):
+		"""Asset disposal and status are decided for the whole document, so an asset
+		cannot be billed on one that mixes directions."""
+		from erpnext.accounts.doctype.sales_invoice.services.fixed_assets import FixedAssetService
+
+		cr_note = self._make_change_order_credit_note(new_item_rate=300)
+		cr_note.items[1].is_fixed_asset = 1
+		cr_note.items[1].asset = "_Test Asset for Change Order"
+
+		self.assertRaisesRegex(
+			frappe.ValidationError,
+			"mixes returned and charged",
+			FixedAssetService(cr_note).validate_fixed_asset,
+		)
+
+	def _make_deferred_change_order_credit_note(self, deferred_account, **args):
+		item = create_item("_Test Item for Deferred Change Order")
+		item.enable_deferred_revenue = 1
+		item.item_defaults[0].deferred_revenue_account = deferred_account
+		item.no_of_months = 12
+		item.save()
+
+		si = create_sales_invoice(qty=1, rate=1000)
+
+		cr_note = create_sales_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=si.name, do_not_save=True
+		)
+		cr_note.items[0].sales_invoice_item = si.items[0].name
+		cr_note.append(
+			"items",
+			{
+				"item_code": item.name,
+				"qty": 1,
+				"rate": 300,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"enable_deferred_revenue": 1,
+				"deferred_revenue_account": deferred_account,
+				"service_start_date": args.get("service_start_date"),
+				"service_end_date": args.get("service_end_date"),
+			},
+		)
+		return cr_note
+
+	def test_credit_note_defers_revenue_on_the_charge_row_only(self):
+		"""The replacement subscription defers its own revenue; only the refunded row is
+		recognised straight away."""
+		deferred_account = create_account(
+			account_name="Deferred Revenue",
+			parent_account="Current Liabilities - _TC",
+			company="_Test Company",
+		)
+		cr_note = self._make_deferred_change_order_credit_note(
+			deferred_account,
+			service_start_date=nowdate(),
+			service_end_date=add_days(nowdate(), 365),
+		)
+		cr_note.insert()
+		cr_note.submit()
+
+		entries = frappe.get_all(
+			"GL Entry", filters={"voucher_no": cr_note.name}, fields=["account", "debit", "credit"]
+		)
+		deferred = [d for d in entries if d.account == deferred_account]
+		income = [d for d in entries if d.account == "Sales - _TC"]
+
+		self.assertEqual(len(deferred), 1)
+		self.assertEqual(deferred[0].credit, 300)
+
+		# the refunded row reverses in full and the replacement recognises nothing now,
+		# so income carries the reversal alone
+		self.assertEqual(len(income), 1)
+		self.assertEqual(income[0].debit, 1000)
+		self.assertEqual(income[0].credit, 0)
+
+	def test_credit_note_validates_service_period_on_the_charge_row(self):
+		"""Deferred fields on a mixed document are checked even though it is a return: a
+		service period that ended before the posting date is still rejected."""
+		deferred_account = create_account(
+			account_name="Deferred Revenue",
+			parent_account="Current Liabilities - _TC",
+			company="_Test Company",
+		)
+		cr_note = self._make_deferred_change_order_credit_note(
+			deferred_account,
+			service_start_date=add_days(nowdate(), -400),
+			service_end_date=add_days(nowdate(), -1),
+		)
+		self.assertRaisesRegex(frappe.ValidationError, "Service End Date cannot be before", cr_note.insert)
+
+	def test_credit_note_without_return_against_requires_a_negative_row(self):
+		cr_note = create_sales_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
+		self.assertRaises(frappe.ValidationError, cr_note.insert)
+
 	def test_timestamp_change(self):
 		w = frappe.copy_doc(self.globalTestRecords["Sales Invoice"][0])
 		w.docstatus = 0

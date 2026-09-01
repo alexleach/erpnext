@@ -21,7 +21,7 @@ class DeferredAccountingService:
 		account_field = DEFERRED_ACCOUNT_FIELD.get(self.doc.doctype)
 
 		for item in self.doc.get("items"):
-			if not self._is_deferred(item) or item.get(account_field):
+			if not self._defers_revenue(item) or item.get(account_field):
 				continue
 
 			default_account = frappe.get_cached_value("Company", self.doc.company, "default_" + account_field)
@@ -35,7 +35,7 @@ class DeferredAccountingService:
 
 	def validate_start_and_end_date(self) -> None:
 		for item in self.doc.items:
-			if not self._is_deferred(item):
+			if not self._defers_revenue(item):
 				continue
 
 			if not (item.service_start_date and item.service_end_date):
@@ -55,6 +55,12 @@ class DeferredAccountingService:
 
 	def _is_deferred(self, item) -> bool:
 		return bool(item.get("enable_deferred_revenue") or item.get("enable_deferred_expense"))
+
+	def _defers_revenue(self, item) -> bool:
+		"""A refund line reverses revenue the original invoice already deferred, so it
+		is recognised straight away and needs no service period of its own. Only a
+		charge line defers anything."""
+		return self._is_deferred(item) and not self.doc.is_return_row(item)
 
 	def clear_stale_deferred_fields(self) -> None:
 		account_field = DEFERRED_ACCOUNT_FIELD.get(self.doc.doctype)

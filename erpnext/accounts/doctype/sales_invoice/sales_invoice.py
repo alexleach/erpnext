@@ -436,9 +436,7 @@ class SalesInvoice(SellingController):
 
 		self.check_prev_docstatus()
 
-		if self.is_return and not self.update_billed_amount_in_sales_order:
-			# NOTE status updating bypassed for is_return
-			self.status_updater = []
+		self.clear_status_updater_for_pure_return()
 
 		SalesTaxWithholding(self).on_submit()
 
@@ -526,9 +524,7 @@ class SalesInvoice(SellingController):
 
 		self.check_sales_order_on_hold_or_close("sales_order")
 
-		if self.is_return and not self.update_billed_amount_in_sales_order:
-			# NOTE status updating bypassed for is_return
-			self.status_updater = []
+		self.clear_status_updater_for_pure_return()
 
 		self.update_status_updater_args()
 		self.update_prevdoc_status()

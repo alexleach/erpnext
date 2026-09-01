@@ -119,7 +119,7 @@ class SalesInvoiceGLComposer(BaseGLComposer):
 		discount_amount = item.discount_amount * item.qty
 		income_account = (
 			item.income_account
-			if (not item.enable_deferred_revenue or doc.is_return)
+			if (not item.enable_deferred_revenue or doc.is_return_row(item))
 			else item.deferred_revenue_account
 		)
 
@@ -378,7 +378,7 @@ class SalesInvoiceGLComposer(BaseGLComposer):
 		doc = self.doc
 		income_account = (
 			item.income_account
-			if (not item.enable_deferred_revenue or doc.is_return)
+			if (not item.enable_deferred_revenue or doc.is_return_row(item))
 			else item.deferred_revenue_account
 		)
 

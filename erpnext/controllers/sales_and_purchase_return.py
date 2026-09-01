@@ -23,10 +23,29 @@ def validate_return(doc):
 	if not doc.meta.get_field("is_return") or not doc.is_return:
 		return
 
+	if doc.has_mixed_qty_signs():
+		validate_refund_lines_have_a_source(doc)
+
 	if doc.return_against:
 		validate_return_against(doc)
 
 		validate_returned_items(doc)
+	elif doc.allows_mixed_qty_signs() and not any(flt(d.qty) < 0 for d in doc.get("items")):
+		frappe.throw(_("At least one item should be entered with negative quantity in return document"))
+
+
+def validate_refund_lines_have_a_source(doc):
+	"""A charge line on a mixed document may be for something new, but a refund line has
+	to say what it reverses, or the document credits something that was never billed."""
+	link_field = get_return_against_item_fields(doc.doctype)
+
+	for item in doc.get("items"):
+		if flt(item.qty) < 0 and not item.get(link_field):
+			frappe.throw(
+				_("Row #{0}: Refunded item {1} must reference the {2} row it is returned against").format(
+					item.idx, frappe.bold(item.item_code), doc.doctype
+				)
+			)
 
 
 def validate_return_against(doc):
@@ -120,16 +139,26 @@ def validate_returned_items(doc):
 	)
 
 	items_returned = False
+	mixed_qty_signs_allowed = doc.allows_mixed_qty_signs()
+
 	for d in doc.get("items"):
 		key = d.item_code
 		raise_exception = False
+		linked_to_reference = False
 		if doc.doctype in ["Purchase Receipt", "Purchase Invoice", "Sales Invoice", "POS Invoice"]:
 			field = frappe.scrub(doc.doctype) + "_item"
 			if d.get(field):
 				key = (d.item_code, d.get(field))
 				raise_exception = True
+				linked_to_reference = True
 		elif doc.doctype == "Delivery Note":
 			key = (d.item_code, d.get("dn_detail"))
+			linked_to_reference = bool(d.get("dn_detail"))
+
+		if mixed_qty_signs_allowed and flt(d.qty) > 0 and not linked_to_reference:
+			# a new charge line, not a return line; a linked positive row still
+			# falls through to validate_quantity
+			continue
 
 		if d.item_code and (flt(d.qty) <= 0 or flt(d.get("received_qty")) <= 0):
 			if key not in valid_items:

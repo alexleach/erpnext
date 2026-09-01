@@ -322,7 +322,7 @@ class PurchaseInvoiceGLComposer(BaseGLComposer):
 				else:
 					expense_account = (
 						item.expense_account
-						if (not item.enable_deferred_expense or doc.is_return)
+						if (not item.enable_deferred_expense or doc.is_return_row(item))
 						else item.deferred_expense_account
 					)
 					account_currency = get_account_currency(expense_account)

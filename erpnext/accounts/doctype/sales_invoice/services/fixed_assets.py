@@ -37,6 +37,16 @@ class FixedAssetService:
 				title=_("Missing Asset"),
 			)
 
+		if doc.has_mixed_qty_signs():
+			# Disposal date, depreciation and asset status are all decided for the document
+			# as a whole, so one document cannot both sell an asset and return another.
+			frappe.throw(
+				_(
+					"Row #{0}: Asset {1} cannot be billed on a document that mixes returned and charged quantities"
+				).format(item.idx, item.asset),
+				title=_("Asset on Mixed Document"),
+			)
+
 		if doc.is_return:
 			if not doc.return_against:
 				frappe.throw(_("Row #{0}: Return Against is required for returning asset").format(item.idx))

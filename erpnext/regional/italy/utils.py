@@ -57,13 +57,14 @@ def prepare_invoice(invoice, progressive_number):
 
 	# Set invoice type
 	if not invoice.type_of_document:
-		if invoice.is_return and invoice.return_against:
-			invoice.type_of_document = "TD04"  # Credit Note (Nota di Credito)
-			invoice.return_against_unamended = get_unamended_name(
-				frappe.get_doc("Sales Invoice", invoice.return_against)
-			)
-		else:
-			invoice.type_of_document = "TD01"  # Sales Invoice (Fattura)
+		invoice.type_of_document = get_type_of_document(invoice)
+
+	# the reference to the invoice being corrected does not depend on how the type was
+	# arrived at, so it is set even when the type was already filled in
+	if invoice.is_return and invoice.return_against:
+		invoice.return_against_unamended = get_unamended_name(
+			frappe.get_doc("Sales Invoice", invoice.return_against)
+		)
 
 	# set customer information
 	invoice.customer_data = frappe.get_doc("Customer", invoice.customer)
@@ -101,6 +102,17 @@ def prepare_invoice(invoice, progressive_number):
 	invoice.customer_po_data = customer_po_data
 
 	return invoice
+
+
+def get_type_of_document(invoice) -> str:
+	"""A credit note names the invoice it corrects and actually credits it. A change
+	order raised as a return can still net positive, and what it bills is an invoice."""
+	corrects_an_invoice = invoice.is_return and invoice.return_against
+
+	if corrects_an_invoice and flt(invoice.base_grand_total) < 0:
+		return "TD04"  # Credit Note (Nota di Credito)
+
+	return "TD01"  # Sales Invoice (Fattura)
 
 
 def get_conditions(filters):

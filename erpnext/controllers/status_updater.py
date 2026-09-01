@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder.functions import Sum
-from frappe.utils import comma_or, flt, get_link_to_form, getdate, now, nowdate, safe_div
+from frappe.utils import cint, comma_or, flt, get_link_to_form, getdate, now, nowdate, safe_div
 
 from erpnext.controllers.item_close import closed_rows_settle, has_closable_items
 
@@ -328,6 +328,15 @@ class StatusUpdater(Document):
 		"""Validates qty at row level"""
 		selling_doctypes = ("Sales Order", "Sales Invoice", "Delivery Note")
 		buying_doctypes = ("Purchase Order", "Purchase Invoice", "Purchase Receipt")
+		mixed_qty_signs_allowed = self.allows_mixed_qty_signs()
+
+		# unticking Update Stock is what lifts the rule, but only an invoice has one to
+		# untick, so only an invoice is told about it
+		update_stock_hint = ""
+		if self.doctype in ("Sales Invoice", "Purchase Invoice"):
+			update_stock_hint = "<br><br>" + _(
+				"Positive and negative quantities can only be mixed on the same invoice while {0} is unchecked."
+			).format(frappe.bold(_("Update Stock")))
 
 		for args in self.status_updater:
 			if "target_ref_field" not in args or args.get("validate_qty") is False:
@@ -350,11 +359,18 @@ class StatusUpdater(Document):
 
 			# get unique transactions to update
 			for d in self.get_all_children():
-				if hasattr(d, "qty") and flt(d.qty) < 0 and not self.get("is_return"):
-					frappe.throw(_("For an item {0}, quantity must be a positive number").format(d.item_code))
+				if not mixed_qty_signs_allowed and hasattr(d, "qty"):
+					if flt(d.qty) < 0 and not self.get("is_return"):
+						frappe.throw(
+							_("For an item {0}, quantity must be a positive number").format(d.item_code)
+							+ update_stock_hint
+						)
 
-				if hasattr(d, "qty") and flt(d.qty) > 0 and self.get("is_return"):
-					frappe.throw(_("For an item {0}, quantity must be a negative number").format(d.item_code))
+					if flt(d.qty) > 0 and self.get("is_return"):
+						frappe.throw(
+							_("For an item {0}, quantity must be a negative number").format(d.item_code)
+							+ update_stock_hint
+						)
 
 				if (not selling_negative_rate_allowed and self.doctype in selling_doctypes) or (
 					not buying_negative_rate_allowed and self.doctype in buying_doctypes
@@ -443,6 +459,35 @@ class StatusUpdater(Document):
 
 						elif item[args["target_ref_field"]]:
 							self.check_overflow_with_allowance(item, args)
+
+	def allows_mixed_qty_signs(self) -> bool:
+		"""On a non-stock invoice a row's sign carries no stock direction, only the
+		direction of the amount, so refund and charge lines may share one document."""
+		return self.doctype in ("Sales Invoice", "Purchase Invoice") and not cint(self.get("update_stock"))
+
+	def is_return_row(self, item) -> bool:
+		"""Whether this row reverses an earlier transaction rather than charging for
+		something new. Only a mixed document can hold both kinds at once; anywhere
+		else every row is whatever the document itself is."""
+		if not self.get("is_return"):
+			return False
+
+		# a row states its own direction through the sign of its quantity; one with no
+		# quantity states nothing, so there the document still answers
+		if self.allows_mixed_qty_signs() and flt(item.get("qty")):
+			return flt(item.get("qty")) < 0
+
+		return True
+
+	def has_mixed_qty_signs(self) -> bool:
+		"""Whether this document actually holds both refund and charge lines, rather than
+		merely being allowed to."""
+		if not self.allows_mixed_qty_signs():
+			return False
+
+		quantities = [flt(d.get("qty")) for d in self.get("items") or []]
+
+		return any(qty > 0 for qty in quantities) and any(qty < 0 for qty in quantities)
 
 	def fetch_items_with_pending_qty(self, args, item_field, items):
 		doctype = frappe.qb.DocType(args["target_dt"])

@@ -2604,6 +2604,195 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def _create_change_order_debit_note(self, new_item_rate, **args):
+		"""A supplier change order as one credit note: the remainder of the old
+		subscription is refunded (negative qty) and the replacement billed alongside."""
+		pi = make_purchase_invoice(qty=1, rate=1000, update_stock=args.get("update_stock"))
+
+		dr_note = make_purchase_invoice(
+			qty=-1,
+			rate=1000,
+			is_return=1,
+			return_against=pi.name,
+			update_stock=args.get("update_stock"),
+			do_not_save=True,
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": new_item_rate,
+				"warehouse": "_Test Warehouse - _TC",
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+			},
+		)
+		return dr_note
+
+	def test_debit_note_allows_mixed_qty_signs_on_downgrade(self):
+		dr_note = self._create_change_order_debit_note(new_item_rate=300)
+		dr_note.save()
+		dr_note.submit()
+		dr_note.reload()
+
+		self.assertEqual(dr_note.grand_total, -700)
+		self.assertEqual(dr_note.outstanding_amount, -700)
+
+	def test_debit_note_allows_mixed_qty_signs_on_upgrade(self):
+		"""An upgrade nets positive; the net sign does not decide whether the rows may
+		be mixed."""
+		dr_note = self._create_change_order_debit_note(new_item_rate=1500)
+		dr_note.save()
+		dr_note.submit()
+		dr_note.reload()
+
+		self.assertEqual(dr_note.grand_total, 500)
+		self.assertEqual(dr_note.outstanding_amount, 500)
+
+	def test_debit_note_with_update_stock_rejects_mixed_qty_signs(self):
+		"""On a stock-bearing invoice the sign of qty also picks the direction of the
+		Stock Ledger Entry."""
+		dr_note = self._create_change_order_debit_note(new_item_rate=300, update_stock=1)
+		self.assertRaises(frappe.ValidationError, dr_note.save)
+
+	def test_debit_note_rejects_fixed_asset_row_when_signs_are_mixed(self):
+		"""Asset handling is decided for the document as a whole - `on_submit` skips it
+		for a return - so an asset cannot be billed on one that mixes directions."""
+		from erpnext.assets.doctype.asset.test_asset import (
+			create_asset_category,
+			create_fixed_asset_item,
+		)
+
+		if not frappe.db.exists("Asset Category", "Computers"):
+			create_asset_category()
+		asset_item = create_fixed_asset_item("_Test Mixed Sign Asset Item")
+
+		pi = make_purchase_invoice(qty=1, rate=1000)
+
+		dr_note = make_purchase_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=pi.name, do_not_save=True
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": asset_item.name,
+				"qty": 1,
+				"rate": 300,
+				"warehouse": "_Test Warehouse - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+			},
+		)
+
+		self.assertRaisesRegex(frappe.ValidationError, "mixes returned and charged", dr_note.save)
+
+	def test_debit_note_keeps_its_own_outstanding_when_signs_are_mixed(self):
+		"""Only part of a mixed document belongs to the invoice it returns against, so its
+		net cannot settle that invoice, however the checkbox is left."""
+		dr_note = self._create_change_order_debit_note(new_item_rate=300)
+		dr_note.update_outstanding_for_self = 0
+		dr_note.save()
+		dr_note.submit()
+		dr_note.reload()
+
+		against_outstanding = frappe.db.get_value(
+			"Purchase Invoice", dr_note.return_against, "outstanding_amount"
+		)
+
+		self.assertEqual(dr_note.update_outstanding_for_self, 1)
+		self.assertEqual(dr_note.outstanding_amount, -700)
+		self.assertEqual(against_outstanding, 1000)
+
+	def test_debit_note_bills_the_order_its_charge_row_came_from(self):
+		"""A charge line pulled from a change order bills that order, even though the
+		document as a whole is a return."""
+		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
+
+		pi = make_purchase_invoice(qty=1, rate=1000)
+		change_po = create_purchase_order(item_code="_Test Item 2", qty=1, rate=300)
+
+		dr_note = make_purchase_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=pi.name, do_not_save=True
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 300,
+				"warehouse": "_Test Warehouse - _TC",
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+				"purchase_order": change_po.name,
+				"po_detail": change_po.items[0].name,
+			},
+		)
+		dr_note.save()
+		dr_note.submit()
+
+		change_po.reload()
+		billed_amt = frappe.db.get_value("Purchase Order Item", change_po.items[0].name, "billed_amt")
+
+		self.assertEqual(change_po.per_billed, 100)
+		self.assertEqual(billed_amt, 300)
+
+	def test_debit_note_defers_expense_on_the_charge_row_only(self):
+		"""The replacement subscription defers its own expense; only the refunded row is
+		recognised straight away."""
+		deferred_account = create_account(
+			account_name="Deferred Expense",
+			parent_account="Current Assets - _TC",
+			company="_Test Company",
+		)
+
+		item = create_item("_Test Item for Deferred Change Order", is_purchase_item=True)
+		item.enable_deferred_expense = 1
+		item.item_defaults[0].deferred_expense_account = deferred_account
+		item.no_of_months_exp = 12
+		item.save()
+
+		pi = make_purchase_invoice(qty=1, rate=1000)
+
+		dr_note = make_purchase_invoice(
+			qty=-1, rate=1000, is_return=1, return_against=pi.name, do_not_save=True
+		)
+		dr_note.items[0].purchase_invoice_item = pi.items[0].name
+		dr_note.append(
+			"items",
+			{
+				"item_code": item.name,
+				"qty": 1,
+				"rate": 300,
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+				"conversion_factor": 1.0,
+				"enable_deferred_expense": 1,
+				"deferred_expense_account": deferred_account,
+				"service_start_date": nowdate(),
+				"service_end_date": add_days(nowdate(), 365),
+			},
+		)
+		dr_note.save()
+		dr_note.submit()
+
+		entries = frappe.get_all(
+			"GL Entry", filters={"voucher_no": dr_note.name}, fields=["account", "debit", "credit"]
+		)
+		deferred = [d for d in entries if d.account == deferred_account]
+
+		self.assertEqual(len(deferred), 1)
+		self.assertEqual(deferred[0].debit, 300)
+
+	def test_debit_note_without_return_against_requires_a_negative_row(self):
+		dr_note = make_purchase_invoice(qty=1, rate=1000, is_return=1, do_not_save=True)
+		self.assertRaises(frappe.ValidationError, dr_note.save)
+
 	def test_debit_note_without_item(self):
 		pi = make_purchase_invoice(item_name="_Test Item", qty=10, do_not_submit=True)
 		pi.items[0].item_code = ""

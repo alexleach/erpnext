@@ -75,6 +75,12 @@ force_item_fields = (
 )
 
 
+BILLED_AMOUNT_OPT_IN_FIELD = {
+	"Sales Invoice": "update_billed_amount_in_sales_order",
+	"Purchase Invoice": "update_billed_amount_in_purchase_order",
+}
+
+
 class AccountsController(TransactionBase):
 	def get_print_settings(self):
 		print_setting_fields = []
@@ -192,6 +198,18 @@ class AccountsController(TransactionBase):
 					frappe.bold(_("Update Outstanding for Self")),
 				)
 
+			elif self.has_mixed_qty_signs():
+				# only part of a mixed document belongs to the invoice
+				# `return_against` points at, so its net cannot be set against
+				# that invoice
+				self.update_outstanding_for_self = 1
+				msg = _(
+					"{0} charges for items of its own as well as returning others, so its total does not belong to {1}. Updating the outstanding to this invoice."
+				).format(
+					frappe.bold(document_type),
+					get_link_to_form(self.doctype, self.get("return_against")),
+				)
+
 			elif not self.update_outstanding_for_self and (
 				abs(flt(self.rounded_total) or flt(self.grand_total)) > flt(against_voucher_outstanding)
 			):
@@ -228,6 +246,21 @@ class AccountsController(TransactionBase):
 
 		return False
 
+	def clear_status_updater_for_pure_return(self) -> None:
+		"""A pure return leaves the order's billed amount alone unless the user opts in.
+		A mixed document also carries charge lines, and those must bill the order they
+		were pulled from, so it never bypasses the update."""
+		if not self.is_return:
+			return
+
+		if self.get(BILLED_AMOUNT_OPT_IN_FIELD[self.doctype]):
+			return
+
+		if self.has_mixed_qty_signs():
+			return
+
+		self.status_updater = []
+
 	def is_item_closable(self, item):
 		"""A row can be closed while anything is still pending on it.
 
@@ -246,6 +279,10 @@ class AccountsController(TransactionBase):
 		clear_closed_rows_on_amend(self)
 
 		if not self.get("is_return") and not self.get("is_debit_note"):
+			self.validate_qty_is_not_zero()
+		elif self.has_mixed_qty_signs():
+			# A zero-quantity line carries no sign, so on a document holding both refunds
+			# and charges there is nothing left to say which of the two it is.
 			self.validate_qty_is_not_zero()
 
 		if (
@@ -267,7 +304,10 @@ class AccountsController(TransactionBase):
 		if self.doctype in ["Sales Invoice", "Purchase Invoice"]:
 			if self.is_return:
 				self.validate_qty()
-			else:
+
+			# A mixed document carries charge lines of its own, so its deferred fields
+			# still need checking even though the document is a return.
+			if not self.is_return or self.allows_mixed_qty_signs():
 				from erpnext.accounts.services.deferred_accounting import DeferredAccountingService
 
 				deferred_service = DeferredAccountingService(self)

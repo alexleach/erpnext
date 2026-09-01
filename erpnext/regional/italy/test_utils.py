@@ -8,6 +8,7 @@ import frappe
 from erpnext.regional.italy.utils import (
 	append_row_as_charges,
 	get_conditions,
+	get_type_of_document,
 	get_unamended_name,
 	update_summary_details,
 )
@@ -16,6 +17,26 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 class TestItalyUtils(ERPNextTestSuite):
 	"""Pure helpers behind the Italian e-invoice export."""
+
+	def test_get_type_of_document_needs_both_a_credit_and_a_source(self):
+		"""Reported to the revenue agency, so it must describe what the document does
+		rather than which flag it carries."""
+
+		def invoice(**kwargs):
+			return frappe._dict({"is_return": 0, "return_against": None, **kwargs})
+
+		self.assertEqual(get_type_of_document(invoice(base_grand_total=1000)), "TD01")
+
+		credit_note = invoice(is_return=1, return_against="SINV-0001", base_grand_total=-700)
+		self.assertEqual(get_type_of_document(credit_note), "TD04")
+
+		# a change order raised as a return but netting positive bills, so it is an invoice
+		upgrade = invoice(is_return=1, return_against="SINV-0001", base_grand_total=500)
+		self.assertEqual(get_type_of_document(upgrade), "TD01")
+
+		# a standalone credit note names no invoice, so it is typed as it is on develop
+		standalone = invoice(is_return=1, base_grand_total=-700)
+		self.assertEqual(get_type_of_document(standalone), "TD01")
 
 	def test_get_conditions_builds_filter_map(self):
 		base = get_conditions({})
