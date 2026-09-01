@@ -231,12 +231,24 @@ class calculate_taxes_and_totals:
 			"sales_incoming_rate",
 			"conversion_factor",
 		]
+		return_link_field = None
+		if self.doc.get("is_return"):
+			from erpnext.controllers.sales_and_purchase_return import get_return_against_item_fields
+
+			return_link_field = get_return_against_item_fields(self.doc.doctype)
+
 		for item in self.doc.items:
 			self.doc.round_floats_in(item, do_not_round_fields=do_not_round_fields)
 			self.calculate_item_rate(item)
 
 			item.net_rate = item.rate
-			if not item.qty and self.doc.get("is_return") and self.doc.get("doctype") != "Purchase Receipt":
+			if (
+				not item.qty
+				and self.doc.get("is_return")
+				and self.doc.get("doctype") != "Purchase Receipt"
+				and return_link_field
+				and not item.get(return_link_field)
+			):
 				item.amount = flt(-1 * item.rate, item.precision("amount"))
 			elif not item.qty and self.doc.get("is_debit_note"):
 				item.amount = flt(item.rate, item.precision("amount"))
