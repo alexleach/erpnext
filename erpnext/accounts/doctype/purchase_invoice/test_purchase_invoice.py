@@ -2604,6 +2604,36 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def test_debit_note_zeroes_a_linked_row_that_returns_nothing(self):
+		"""A quantity of zero multiplies out like any other quantity, so a linked row
+		returning nothing debits nothing."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		pi = make_purchase_invoice(qty=10, rate=100, do_not_save=True)
+		pi.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 1000,
+				"warehouse": "_Test Warehouse - _TC",
+				"conversion_factor": 1.0,
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		pi.insert()
+		pi.submit()
+
+		dr_note = make_return_doc("Purchase Invoice", pi.name)
+		dr_note.items[0].qty = -1
+		dr_note.items[1].qty = 0
+		dr_note.insert()
+		dr_note.submit()
+
+		self.assertEqual(dr_note.items[1].amount, 0)
+		self.assertEqual(dr_note.grand_total, -100)
+
 	def test_debit_note_without_item(self):
 		pi = make_purchase_invoice(item_name="_Test Item", qty=10, do_not_submit=True)
 		pi.items[0].item_code = ""
