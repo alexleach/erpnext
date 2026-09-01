@@ -402,7 +402,7 @@
   {
    "fetch_from": "item.description",
    "fieldname": "description",
-   "fieldtype": "Small Text",
+   "fieldtype": "Text Editor",
    "label": "Item Description",
    "read_only": 1
   },
@@ -771,7 +771,7 @@
  "image_field": "image",
  "is_submittable": 1,
  "links": [],
- "modified": "2026-08-19 14:00:00.000000",
+ "modified": "2026-08-23 15:20:11.032436",
  "modified_by": "Administrator",
  "module": "Manufacturing",
  "name": "BOM",
@@ -802,6 +802,30 @@
    "share": 1,
    "submit": 1,
    "write": 1
+  },
+  {
+   "role": "Maintenance User",
+   "select": 1
+  },
+  {
+   "role": "Purchase Manager",
+   "select": 1
+  },
+  {
+   "role": "Purchase User",
+   "select": 1
+  },
+  {
+   "role": "Sales Manager",
+   "select": 1
+  },
+  {
+   "role": "Sales User",
+   "select": 1
+  },
+  {
+   "role": "Stock Manager",
+   "select": 1
   }
  ],
  "row_format": "Dynamic",

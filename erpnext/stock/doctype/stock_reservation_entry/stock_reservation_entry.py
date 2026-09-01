@@ -245,7 +245,7 @@ class StockReservationEntry(Document):
 		]
 		for d in mandatory:
 			if not self.get(d):
-				msg = _("{0} is required").format(_(self.meta.get_label(d)))
+				msg = _("{0} is required").format(self.meta.get_translated_label(d))
 				frappe.throw(msg)
 
 	def validate_group_warehouse(self) -> None:
@@ -1971,7 +1971,7 @@ def update_serial_batch_delivered_qty(row, name, is_cancelled=False):
 				.where((doctype.parent == name) & (doctype.batch_no == batch_no))
 			)
 
-		query.run()
+			query.run()
 
 
 def get_reserved_materials(voucher_no):

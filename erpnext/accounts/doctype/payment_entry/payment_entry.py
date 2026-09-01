@@ -278,7 +278,8 @@ class PaymentEntry(AccountsController):
 		if not liability_account:
 			throw(
 				_("Please set default {0} in Company {1}").format(
-					frappe.bold(frappe.get_meta("Company").get_label(fieldname)), frappe.bold(self.company)
+					frappe.bold(frappe.get_meta("Company").get_translated_label(fieldname)),
+					frappe.bold(self.company),
 				)
 			)
 
@@ -661,7 +662,7 @@ class PaymentEntry(AccountsController):
 	def validate_mandatory(self):
 		for field in ("paid_amount", "received_amount", "source_exchange_rate", "target_exchange_rate"):
 			if not self.get(field):
-				frappe.throw(_("{0} is mandatory").format(_(self.meta.get_label(field))))
+				frappe.throw(_("{0} is mandatory").format(self.meta.get_translated_label(field)))
 
 	def validate_reference_documents(self):
 		valid_reference_doctypes = self.get_valid_reference_doctypes()
@@ -1117,8 +1118,14 @@ class PaymentEntry(AccountsController):
 			)
 
 	def set_exchange_gain_loss(self):
+		other_deductions = 0
+		if self.payment_type == "Internal Transfer":
+			other_deductions = sum(
+				flt(row.amount) for row in self.get("deductions") if not row.is_exchange_gain_loss
+			)
+
 		exchange_gain_loss = flt(
-			self.base_paid_amount - self.base_received_amount,
+			self.base_paid_amount - self.base_received_amount - other_deductions,
 			self.precision("amount", "deductions"),
 		)
 
@@ -1151,7 +1158,7 @@ class PaymentEntry(AccountsController):
 				if value:
 					continue
 
-				label = _(frappe.get_meta("Company").get_label(fieldname))
+				label = frappe.get_meta("Company").get_translated_label(fieldname)
 				return frappe.msgprint(
 					_("Please set {0} in Company {1} to account for Exchange Gain / Loss").format(
 						label, get_link_to_form("Company", self.company)
@@ -2619,7 +2626,11 @@ def get_payment_entry(
 	reference_date: str | date | None = None,
 	created_from_payment_request: bool | None = None,
 ):
+	frappe.has_permission("Payment Entry", ptype="create", throw=True)
+
 	doc = frappe.get_doc(dt, dn)
+	doc.check_permission()
+
 	over_billing_allowance = frappe.get_single_value("Accounts Settings", "over_billing_allowance")
 	if dt in ("Sales Order", "Purchase Order") and flt(doc.per_billed, 2) >= (100.0 + over_billing_allowance):
 		frappe.throw(_("Can only make payment against unbilled {0}").format(_(dt)))

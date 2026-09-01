@@ -172,6 +172,7 @@ class DeliveryNote(SellingController):
 				"percent_join_field": "against_sales_order",
 				"status_field": "delivery_status",
 				"keyword": "Delivered",
+				"exclude_field": "skip_delivery",
 				"second_source_dt": "Sales Invoice Item",
 				"second_source_field": "qty",
 				"second_join_field": "so_detail",
@@ -370,7 +371,7 @@ class DeliveryNote(SellingController):
 			if missing_label and missing_label != "No Label":
 				errors.append(
 					_("The field {0} in row {1} is not set").format(
-						frappe.bold(_(missing_label)), frappe.bold(item.idx)
+						frappe.bold(_(missing_label, context=item.doctype)), frappe.bold(item.idx)
 					)
 				)
 
@@ -625,6 +626,9 @@ class DeliveryNote(SellingController):
 	def update_status(self, status):
 		BillingStatusService(self).update_status(status)
 
+	def on_item_close_status_change(self):
+		self.update_billing_percentage()
+
 	def update_billing_status(self, update_modified=True):
 		BillingStatusService(self).update_billing_status(update_modified)
 
@@ -651,4 +655,5 @@ def get_list_context(context=None):
 @frappe.whitelist()
 def update_delivery_note_status(docname: str, status: str):
 	dn = frappe.get_lazy_doc("Delivery Note", docname)
+	dn.check_permission("submit")
 	dn.update_status(status)

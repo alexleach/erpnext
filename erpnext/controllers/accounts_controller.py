@@ -39,6 +39,7 @@ from erpnext.accounts.utils import (
 	get_advance_payment_doctypes as _get_advance_payment_doctypes,
 )
 from erpnext.accounts.utils import get_fiscal_year, validate_fiscal_year
+from erpnext.controllers.item_close import clear_closed_rows_on_amend
 from erpnext.controllers.print_settings import (
 	set_print_templates_for_item_table,
 	set_print_templates_for_taxes,
@@ -260,7 +261,23 @@ class AccountsController(TransactionBase):
 
 		self.status_updater = []
 
+	def is_item_closable(self, item):
+		"""A row can be closed while anything is still pending on it.
+
+		Billing is the axis every closable document shares; the order doctypes
+		extend this with their own fulfilment axis.
+
+		Amounts are compared as magnitudes so that return rows stay closable.
+		That is deliberate: writing off a credit note that will never be issued
+		is a real decision, and closing a whole return document is already
+		allowed. Leaving it to the sign of the amount would decide it by
+		accident.
+		"""
+		return abs(flt(item.billed_amt)) < abs(flt(item.amount))
+
 	def validate(self):
+		clear_closed_rows_on_amend(self)
+
 		if not self.get("is_return") and not self.get("is_debit_note"):
 			self.validate_qty_is_not_zero()
 		elif self.has_mixed_qty_signs():
@@ -564,7 +581,7 @@ class AccountsController(TransactionBase):
 					_(
 						"Please set {0} to {1}, the same account that was used in the original invoice {2}."
 					).format(
-						frappe.bold(_(self.meta.get_label(cr_dr_account_field), context=self.doctype)),
+						frappe.bold(self.meta.get_translated_label(cr_dr_account_field)),
 						frappe.bold(original_account),
 						frappe.bold(self.return_against),
 					)
@@ -575,6 +592,8 @@ class AccountsController(TransactionBase):
 			frappe.throw(_("To Date cannot be before From Date"), title=_("Invalid Auto Repeat Date"))
 
 	def before_print(self, settings=None):
+		self.set_missing_terms()
+
 		if self.doctype in [
 			"Purchase Order",
 			"Sales Order",
@@ -597,6 +616,16 @@ class AccountsController(TransactionBase):
 
 		set_print_templates_for_item_table(self, settings)
 		set_print_templates_for_taxes(self, settings)
+
+	def set_missing_terms(self):
+		if not self.get("tc_name") or self.get("terms"):
+			return
+
+		from erpnext.setup.doctype.terms_and_conditions.terms_and_conditions import (
+			get_terms_and_conditions,
+		)
+
+		self.terms = get_terms_and_conditions(self.tc_name, self.as_dict())
 
 	def calculate_paid_amount(self):
 		if hasattr(self, "is_pos") or hasattr(self, "is_paid"):

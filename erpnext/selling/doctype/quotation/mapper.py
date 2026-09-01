@@ -9,6 +9,8 @@ from frappe.model.document import Document
 from frappe.model.mapper import get_mapped_doc
 from frappe.utils import cint, flt, getdate, nowdate
 
+from erpnext.controllers.mapper import get_qty_already_mapped
+
 
 @frappe.whitelist()
 def make_sales_order(
@@ -35,6 +37,9 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 
 	customer = _make_customer(source_name, ignore_permissions)
 	ordered_items = get_ordered_items(source_name)
+	mapped_items = get_qty_already_mapped(target_doc, "quotation_item", "stock_qty")
+	for name, stock_qty in mapped_items.items():
+		ordered_items[name] = flt(ordered_items.get(name)) + stock_qty
 
 	selected_rows = [x.get("name") for x in frappe.flags.get("args", {}).get("selected_items", [])]
 
@@ -88,7 +93,10 @@ def _make_sales_order(source_name, target_doc=None, ignore_permissions=False, ar
 		2. If selections: Is Alternative Item/Has Alternative Item: Map if selected and adequate qty
 		3. If no selections: Simple row: Map if adequate qty
 		"""
-		if not ((item.stock_qty > ordered_items.get(item.name, 0.0)) or is_unit_price_row(item)):
+		if not (
+			(item.stock_qty > ordered_items.get(item.name, 0.0))
+			or (is_unit_price_row(item) and item.name not in mapped_items)
+		):
 			return False
 
 		if not selected_rows:
@@ -257,7 +265,7 @@ def handle_mandatory_error(e, customer, lead_name):
 	from frappe.utils import get_link_to_form
 
 	mandatory_fields = e.args[0].split(":")[1].split(",")
-	mandatory_fields = [_(customer.meta.get_label(field.strip())) for field in mandatory_fields]
+	mandatory_fields = [customer.meta.get_translated_label(field.strip()) for field in mandatory_fields]
 
 	frappe.local.message_log = []
 	message = _("Could not auto create Customer due to the following missing mandatory field(s):") + "<br>"

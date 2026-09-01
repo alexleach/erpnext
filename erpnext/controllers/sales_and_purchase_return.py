@@ -50,7 +50,9 @@ def validate_refund_lines_have_a_source(doc):
 
 def validate_return_against(doc):
 	if not frappe.db.exists(doc.doctype, doc.return_against):
-		frappe.throw(_("Invalid {0}: {1}").format(doc.meta.get_label("return_against"), doc.return_against))
+		frappe.throw(
+			_("Invalid {0}: {1}").format(doc.meta.get_translated_label("return_against"), doc.return_against)
+		)
 	else:
 		ref_doc = frappe.get_doc(doc.doctype, doc.return_against)
 
@@ -59,7 +61,7 @@ def validate_return_against(doc):
 		if ref_doc.get(party_type) != doc.get(party_type):
 			frappe.throw(
 				_("The {0} {1} does not match with the {0} {2} in the {3} {4}").format(
-					doc.meta.get_label(party_type),
+					doc.meta.get_translated_label(party_type),
 					bold(doc.get(party_type)),
 					bold(ref_doc.get(party_type)),
 					ref_doc.doctype,
@@ -244,7 +246,7 @@ def validate_quantity(doc, key, args, ref, valid_items, already_returned_items):
 			else 0
 		)
 
-		if column == "stock_qty" and not args.get("return_qty_from_rejected_warehouse"):
+		if column in ("stock_qty", "qty") and not args.get("return_qty_from_rejected_warehouse"):
 			reference_qty = ref.get(column)
 			current_stock_qty = args.get(column)
 		elif args.get("return_qty_from_rejected_warehouse"):
