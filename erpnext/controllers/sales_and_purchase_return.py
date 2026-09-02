@@ -88,7 +88,16 @@ def validate_return_against(doc):
 def validate_returned_items(doc):
 	valid_items = frappe._dict()
 
-	select_fields = ["item_code", "qty", "stock_qty", "rate", "parenttype", "conversion_factor", "name"]
+	select_fields = [
+		"item_code",
+		"qty",
+		"stock_qty",
+		"rate",
+		"amount",
+		"parenttype",
+		"conversion_factor",
+		"name",
+	]
 	if doc.doctype != "Purchase Invoice":
 		select_fields += ["serial_no", "batch_no"]
 
@@ -142,9 +151,11 @@ def validate_returned_items(doc):
 			else:
 				ref = valid_items.get(key, frappe._dict())
 				validate_quantity(doc, key, d, ref, valid_items, already_returned_items)
+				validate_credited_amount(key, d, ref, already_returned_items)
 
 				if (
 					ref.rate
+					and flt(d.qty)
 					and flt(d.rate) > ref.rate
 					and doc.doctype in ("Delivery Note", "Sales Invoice")
 					and get_valuation_method(d.item_code, doc.company) != "Moving Average"
@@ -250,6 +261,28 @@ def validate_quantity(doc, key, args, ref, valid_items, already_returned_items):
 				)
 
 
+def validate_credited_amount(key, args, ref, already_returned_items):
+	"""A row that returns no quantity is not counted against the row it points at, since
+	consumption is tracked by quantity. Bound what it may credit by the amount that row
+	was invoiced for, so the same row cannot be credited over and over.
+
+	This is also what bounds its rate: a per unit cap says nothing about a row carrying
+	no units, so the line's own total stands in for it."""
+	if flt(args.qty):
+		return
+
+	precision = args.precision("amount")
+	already_credited = flt(already_returned_items.get(key, {}).get("amount"), precision)
+	creditable_amount = flt(flt(ref.get("amount"), precision) - already_credited, precision)
+
+	if abs(flt(args.amount, precision)) > creditable_amount:
+		frappe.throw(
+			_("Row # {0}: Cannot credit more than {1} for Item {2}").format(
+				args.idx, creditable_amount, args.item_code
+			)
+		)
+
+
 def get_ref_item_dict(valid_items, ref_item_row):
 	from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 
@@ -263,6 +296,7 @@ def get_ref_item_dict(valid_items, ref_item_row):
 			{
 				"qty": 0,
 				"rate": 0,
+				"amount": 0,
 				"stock_qty": 0,
 				"rejected_qty": 0,
 				"received_qty": 0,
@@ -275,6 +309,7 @@ def get_ref_item_dict(valid_items, ref_item_row):
 	item_dict = valid_items[key]
 	item_dict["qty"] += ref_item_row.qty
 	item_dict["stock_qty"] += ref_item_row.get("stock_qty", 0)
+	item_dict["amount"] += ref_item_row.get("amount", 0)
 	if ref_item_row.get("rate", 0) > item_dict["rate"]:
 		item_dict["rate"] = ref_item_row.get("rate", 0)
 
@@ -309,6 +344,7 @@ def get_already_returned_items(doc):
 			child.item_code,
 			Sum(Abs(child.qty)).as_("qty"),
 			Sum(Abs(child.stock_qty)).as_("stock_qty"),
+			Sum(Abs(child.amount)).as_("amount"),
 			child[field],
 		)
 		.where((par.docstatus == 1) & (par.is_return == 1) & (par.return_against == doc.return_against))
@@ -331,6 +367,7 @@ def get_already_returned_items(doc):
 				{
 					"qty": d.get("qty"),
 					"stock_qty": d.get("stock_qty"),
+					"amount": d.get("amount"),
 					"received_qty": d.get("received_qty"),
 					"rejected_qty": d.get("rejected_qty"),
 				}

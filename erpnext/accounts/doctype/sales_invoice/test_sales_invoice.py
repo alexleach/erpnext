@@ -122,6 +122,105 @@ class TestSalesInvoice(ERPNextTestSuite):
 		si.append("items", {"item_code": "_Test Item 2", "qty": 1, "rate": -150})
 		self.assertRaises(frappe.ValidationError, si.save)
 
+	def _invoice_with_an_allowance_candidate(self):
+		si = create_sales_invoice(qty=5, rate=100, do_not_save=True)
+		si.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 80,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		si.insert()
+		si.submit()
+		return si
+
+	def test_credit_note_allows_an_allowance_on_a_kept_item(self):
+		"""One item returned, another kept with a monetary allowance: the zero quantity
+		row credits its value, and the note is worth both together."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = self._invoice_with_an_allowance_candidate()
+
+		cr_note = make_return_doc("Sales Invoice", si.name)
+		cr_note.items[0].qty = -1
+		cr_note.items[1].qty = 0
+		cr_note.insert()
+		cr_note.submit()
+
+		self.assertEqual(cr_note.items[1].amount, -80)
+		self.assertEqual(cr_note.grand_total, -180)
+
+	def test_credit_note_allows_an_allowance_for_a_whole_multi_unit_line(self):
+		"""A per unit rate cap says nothing about a row carrying no units, so a line sold
+		twice at 80 can be credited its full 160 at once rather than across two notes."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = create_sales_invoice(qty=10, rate=100, do_not_save=True)
+		si.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 2,
+				"rate": 80,
+				"income_account": "Sales - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		si.insert()
+		si.submit()
+
+		cr_note = make_return_doc("Sales Invoice", si.name)
+		cr_note.items[0].qty = -1
+		cr_note.items[1].qty = 0
+		cr_note.items[1].rate = 160
+		cr_note.insert()
+		cr_note.submit()
+
+		self.assertEqual(cr_note.items[1].amount, -160)
+
+		# ...but no further, the line having been credited in full
+		beyond = make_return_doc("Sales Invoice", si.name)
+		beyond.items[0].qty = -1
+		beyond.items[1].qty = 0
+
+		self.assertRaisesRegex(frappe.ValidationError, "Cannot credit more than", beyond.insert)
+
+	def test_credit_note_caps_an_allowance_at_the_amount_invoiced(self):
+		"""A zero quantity row consumes none of the row it points at, so without a cap on
+		value the same item could be credited on every credit note."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = self._invoice_with_an_allowance_candidate()
+
+		first = make_return_doc("Sales Invoice", si.name)
+		first.items[0].qty = -1
+		first.items[1].qty = 0
+		first.insert()
+		first.submit()
+
+		second = make_return_doc("Sales Invoice", si.name)
+		second.items[0].qty = -1
+		second.items[1].qty = 0
+
+		self.assertRaisesRegex(frappe.ValidationError, "Cannot credit more than", second.insert)
+
+	def test_credit_note_still_returns_the_full_quantity(self):
+		"""The cap is on value that quantity does not account for, so an ordinary full
+		return is untouched."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		si = self._invoice_with_an_allowance_candidate()
+
+		cr_note = make_return_doc("Sales Invoice", si.name)
+		cr_note.insert()
+		cr_note.submit()
+
+		self.assertEqual(cr_note.grand_total, -580)
+
 	def test_timestamp_change(self):
 		w = frappe.copy_doc(self.globalTestRecords["Sales Invoice"][0])
 		w.docstatus = 0

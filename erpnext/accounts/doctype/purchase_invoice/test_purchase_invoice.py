@@ -2604,6 +2604,41 @@ class TestPurchaseInvoice(ERPNextTestSuite, StockTestMixin):
 
 		self.assertRaises(frappe.ValidationError, dr_note.save)
 
+	def test_debit_note_caps_an_allowance_at_the_amount_invoiced(self):
+		"""A zero quantity row consumes none of the row it points at, so its value is
+		bounded by what that row was billed for."""
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		pi = make_purchase_invoice(qty=5, rate=100, do_not_save=True)
+		pi.append(
+			"items",
+			{
+				"item_code": "_Test Item 2",
+				"qty": 1,
+				"rate": 80,
+				"warehouse": "_Test Warehouse - _TC",
+				"conversion_factor": 1.0,
+				"expense_account": "_Test Account Cost for Goods Sold - _TC",
+				"cost_center": "_Test Cost Center - _TC",
+			},
+		)
+		pi.insert()
+		pi.submit()
+
+		first = make_return_doc("Purchase Invoice", pi.name)
+		first.items[0].qty = -1
+		first.items[1].qty = 0
+		first.insert()
+		first.submit()
+
+		self.assertEqual(first.grand_total, -180)
+
+		second = make_return_doc("Purchase Invoice", pi.name)
+		second.items[0].qty = -1
+		second.items[1].qty = 0
+
+		self.assertRaisesRegex(frappe.ValidationError, "Cannot credit more than", second.insert)
+
 	def test_debit_note_without_item(self):
 		pi = make_purchase_invoice(item_name="_Test Item", qty=10, do_not_submit=True)
 		pi.items[0].item_code = ""
