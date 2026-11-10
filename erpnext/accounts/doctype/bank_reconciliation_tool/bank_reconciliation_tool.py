@@ -25,6 +25,7 @@ from erpnext.accounts.doctype.bank_transaction.bank_transaction import (
 )
 from erpnext.accounts.party import get_party_account
 from erpnext.accounts.report.bank_reconciliation_statement.bank_reconciliation_statement import (
+	get_amount_in_bank_currency,
 	get_amounts_not_reflected_in_system,
 	get_entries,
 )
@@ -1388,6 +1389,7 @@ def check_matching(
 			"party_type": transaction.party_type,
 			"party": transaction.party,
 			"bank_account": bank_account,
+			"company": company,
 		}
 	)
 
@@ -1697,9 +1699,11 @@ def get_si_matching_query(exact_match, currency, common_filters, transaction):
 	ref_condition = sip.reference_no == transaction.reference_number
 	ref_rank = frappe.qb.terms.Case().when(ref_condition, 1).else_(0)
 
-	amount_equality = sip.amount == common_filters.amount
+	bank = frappe._dict(account=common_filters.bank_account, company=common_filters.company)
+	paid_amount = get_amount_in_bank_currency(bank, sip.amount, sip.base_amount)
+	amount_equality = paid_amount == common_filters.amount
 	amount_rank = frappe.qb.terms.Case().when(amount_equality, 1).else_(0)
-	amount_condition = amount_equality if exact_match else sip.amount > 0.0
+	amount_condition = amount_equality if exact_match else paid_amount > 0.0
 
 	party_condition = si.customer == common_filters.party
 	party_rank = frappe.qb.terms.Case().when(party_condition, 1).else_(0)
@@ -1712,19 +1716,18 @@ def get_si_matching_query(exact_match, currency, common_filters, transaction):
 			(ref_rank + party_rank + amount_rank + 1).as_("rank"),
 			ConstantColumn("Sales Invoice").as_("doctype"),
 			si.name,
-			sip.amount.as_("paid_amount"),
+			paid_amount.as_("paid_amount"),
 			sip.reference_no,
 			ConstantColumn("").as_("reference_date"),
 			si.customer.as_("party"),
 			ConstantColumn("Customer").as_("party_type"),
 			si.posting_date,
-			si.currency,
+			ConstantColumn(currency).as_("currency"),
 		)
 		.where(si.docstatus == 1)
 		.where(sip.clearance_date.isnull())
 		.where(sip.account == common_filters.bank_account)
 		.where(amount_condition)
-		.where(si.currency == currency)
 	)
 
 	if frappe.flags.auto_reconcile_vouchers is True:
@@ -1737,9 +1740,13 @@ def get_pi_matching_query(exact_match, currency, common_filters):
 	# get matching purchase invoice query when they are also used as payment entries (is_paid)
 	purchase_invoice = frappe.qb.DocType("Purchase Invoice")
 
-	amount_equality = purchase_invoice.paid_amount == common_filters.amount
+	bank = frappe._dict(account=common_filters.bank_account, company=common_filters.company)
+	paid_amount = get_amount_in_bank_currency(
+		bank, purchase_invoice.paid_amount, purchase_invoice.base_paid_amount
+	)
+	amount_equality = paid_amount == common_filters.amount
 	amount_rank = frappe.qb.terms.Case().when(amount_equality, 1).else_(0)
-	amount_condition = amount_equality if exact_match else purchase_invoice.paid_amount > 0.0
+	amount_condition = amount_equality if exact_match else paid_amount > 0.0
 
 	party_condition = purchase_invoice.supplier == common_filters.party
 	party_rank = frappe.qb.terms.Case().when(party_condition, 1).else_(0)
@@ -1750,20 +1757,19 @@ def get_pi_matching_query(exact_match, currency, common_filters):
 			(party_rank + amount_rank + 1).as_("rank"),
 			ConstantColumn("Purchase Invoice").as_("doctype"),
 			purchase_invoice.name,
-			purchase_invoice.paid_amount,
+			paid_amount.as_("paid_amount"),
 			ConstantColumn("").as_("reference_no"),
 			ConstantColumn("").as_("reference_date"),
 			purchase_invoice.supplier.as_("party"),
 			ConstantColumn("Supplier").as_("party_type"),
 			purchase_invoice.posting_date,
-			purchase_invoice.currency,
+			ConstantColumn(currency).as_("currency"),
 		)
 		.where(purchase_invoice.docstatus == 1)
 		.where(purchase_invoice.is_paid == 1)
 		.where(purchase_invoice.clearance_date.isnull())
 		.where(purchase_invoice.cash_bank_account == common_filters.bank_account)
 		.where(amount_condition)
-		.where(purchase_invoice.currency == currency)
 	)
 
 	return query
