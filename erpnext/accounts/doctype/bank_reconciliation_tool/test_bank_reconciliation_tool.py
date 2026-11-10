@@ -316,6 +316,32 @@ class TestBankReconciliationTool(ERPNextTestSuite, AccountsTestMixin):
 		matches = self.get_exact_matches(transaction.name, "purchase_invoice")
 		self.assertEqual(matches, [(invoice.name, 800, "INR")])
 
+	def test_deposit_matches_foreign_currency_pos_sales_invoice(self):
+		mode_of_payment = frappe.get_doc(
+			{
+				"doctype": "Mode of Payment",
+				"mode_of_payment": "Foreign Currency Transfer",
+				"type": "Bank",
+				"accounts": [{"company": self.company, "default_account": self.bank}],
+			}
+		).insert()
+		invoice = create_sales_invoice(
+			customer="_Test Customer USD",
+			debit_to="_Test Receivable USD - _TC",
+			currency="USD",
+			conversion_rate=80,
+			is_pos=1,
+			qty=1,
+			rate=10,
+			do_not_save=1,
+		)
+		invoice.set("payments", [{"mode_of_payment": mode_of_payment.name, "amount": 10}])
+		invoice.insert().submit()
+		transaction = self.make_bank_transaction(date=today(), deposit=800)
+
+		matches = self.get_exact_matches(transaction.name, "sales_invoice")
+		self.assertEqual(matches, [(invoice.name, 800, "INR")])
+
 	def test_opening_balance_includes_uncleared_entries(self):
 		def opening():
 			return get_account_opening_balance(self.bank_account, today())
