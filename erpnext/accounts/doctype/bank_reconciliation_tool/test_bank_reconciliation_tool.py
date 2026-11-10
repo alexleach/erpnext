@@ -27,6 +27,7 @@ from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool 
 )
 from erpnext.accounts.doctype.journal_entry.test_journal_entry import make_journal_entry
 from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_payment_entry
+from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 from erpnext.tests.permission_test_utils import (
@@ -290,6 +291,30 @@ class TestBankReconciliationTool(ERPNextTestSuite, AccountsTestMixin):
 		exact_matches = self.get_matching_payment_entries(transaction.name, exact_match=True)
 		self.assertEqual([m["name"] for m in exact_matches], [payment.name])
 		self.assertEqual(exact_matches[0]["paid_amount"], 1250)
+
+	def get_exact_matches(self, bank_transaction, document_type):
+		vouchers = get_linked_payments(
+			bank_transaction, [document_type, "exact_match"], from_date=add_days(today(), -1), to_date=today()
+		)
+		return [(v["name"], v["paid_amount"], v["currency"]) for v in vouchers]
+
+	def test_withdrawal_matches_foreign_currency_paid_purchase_invoice(self):
+		invoice = make_purchase_invoice(
+			supplier="_Test Supplier USD",
+			currency="USD",
+			conversion_rate=80,
+			qty=1,
+			rate=10,
+			is_paid=1,
+			cash_bank_account=self.bank,
+			do_not_save=True,
+		)
+		invoice.paid_amount = 10
+		invoice.save().submit()
+		transaction = self.make_bank_transaction(date=today(), deposit=0, withdrawal=800)
+
+		matches = self.get_exact_matches(transaction.name, "purchase_invoice")
+		self.assertEqual(matches, [(invoice.name, 800, "INR")])
 
 	def test_opening_balance_includes_uncleared_entries(self):
 		def opening():
