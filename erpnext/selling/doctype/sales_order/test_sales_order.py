@@ -2050,6 +2050,7 @@ class TestSalesOrder(ERPNextTestSuite):
 		so.submit()
 
 		po = make_purchase_order(so.name, selected_items=[so_items[0]])[0]
+		po.save()
 		po.submit()
 
 		dn = create_dn_against_so(so.name, delivered_qty=2)
