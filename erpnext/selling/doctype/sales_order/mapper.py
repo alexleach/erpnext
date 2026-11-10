@@ -892,7 +892,8 @@ def make_purchase_order(
 		)
 
 		set_delivery_date(doc.items, source_name)
-		if doc.supplier:
+		if len(suppliers) > 1:
+			# Batch save when more than one supplier
 			doc.insert()
 		purchase_orders.append(doc)
 
