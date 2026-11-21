@@ -573,9 +573,9 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 	}
 
 	open_row(name) {
-		const row = locals["Timesheet Detail"][name];
-		if (!row) return;
-		this.grid.grid_pagination.go_to_page(Math.ceil(row.idx / this.grid.grid_pagination.page_length));
+		const index = this.grid.data.findIndex((d) => d.name === name);
+		if (index === -1) return;
+		this.grid.grid_pagination.go_to_page(Math.floor(index / this.grid.grid_pagination.page_length) + 1);
 		this.grid.get_row(name)?.toggle_view(true);
 	}
 
