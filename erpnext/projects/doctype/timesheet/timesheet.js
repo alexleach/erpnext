@@ -534,6 +534,7 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 		const rows = (this.frm.doc.time_logs || [])
 			.filter((d) => d.from_time || d.to_time)
 			.map((d) => ({ ...d, _title: this.get_title(d) }));
+		this.set_legend(rows);
 		const editable = this.grid.is_editable();
 		return this.prepare_events(rows).map((d) => Object.assign(d, { editable }));
 	}
@@ -543,14 +544,32 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 		return parts.join(" · ") || d.description || __("Time log");
 	}
 
-	// one colour per project, so a month reads at a glance
 	get_css_class(d) {
-		const key = d.project || d.activity_type;
+		return this.get_color(d.project || d.activity_type);
+	}
+
+	// one colour per project (or activity type), so a month reads at a glance;
+	// only colours that both calendar events and badges have, so the legend matches
+	get_color(key) {
 		if (!key) return "gray";
-		const colors = ["blue", "green", "orange", "purple", "pink", "cyan", "teal", "violet", "amber"];
+		const colors = ["blue", "green", "amber", "violet", "cyan", "pink"];
 		let hash = 0;
 		for (const c of key) hash = (hash * 31 + c.charCodeAt(0)) | 0;
 		return colors[Math.abs(hash) % colors.length];
+	}
+
+	set_legend(rows) {
+		const labels = new Map();
+		for (const d of rows) {
+			const key = d.project || d.activity_type;
+			if (key) labels.set(key, d.project ? d.project_name || d.project : d.activity_type);
+		}
+		this.$legend ??= $('<div class="flex flex-wrap gap-2 pt-3">').insertAfter(this.$cal);
+		this.$legend.html(
+			[...labels]
+				.map(([key, label]) => frappe.ui.badge.html({ label, theme: this.get_color(key) }))
+				.join("")
+		);
 	}
 
 	open_row(name) {
