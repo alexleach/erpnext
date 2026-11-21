@@ -475,3 +475,145 @@ function set_project_in_timelog(frm) {
 		});
 	}
 }
+
+frappe.provide("erpnext.projects");
+
+// Desk's calendar view, fed from the form's time_logs. Edits go through the child table,
+// so the Timesheet Detail triggers recalculate hours, billing and totals.
+erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.views.Calendar {
+	constructor(frm, parent) {
+		super({
+			frm,
+			parent,
+			doctype: "Timesheet Detail",
+			field_map: { id: "name", start: "from_time", end: "to_time", title: "_title" },
+		});
+	}
+
+	get grid() {
+		return this.frm.fields_dict.time_logs.grid;
+	}
+
+	// the list view's page menu and viewport height do not apply inside a form
+	make_page() {}
+	set_calendar_height() {}
+
+	make() {
+		super.make();
+		this.footnote_area.html(
+			__("In Week or Day view, drag across time slots to log time. Double-click a day to open it.")
+		);
+	}
+
+	setup_options(defaults) {
+		super.setup_options(defaults);
+		const { datesSet } = this.cal_options;
+		Object.assign(this.cal_options, {
+			height: 650,
+			datesSet: (info) => {
+				datesSet(info);
+				info.view.calendar.setOption("height", info.view.type === "dayGridMonth" ? "auto" : 650);
+			},
+			initialDate: this.frm.doc.start_date || undefined,
+			selectable: this.grid.is_editable(),
+			events: (info, success) => success(this.get_events()),
+			eventClick: (info) => this.open_row(info.event.id),
+			eventDrop: (info) => this.move_row(info.event),
+			eventResize: (info) => this.move_row(info.event),
+			select: (info) => this.add_row(info),
+		});
+	}
+
+	refresh() {
+		if (!this.fullCalendar) return;
+		this.fullCalendar.setOption("selectable", this.grid.is_editable());
+		super.refresh();
+	}
+
+	get_events() {
+		const rows = (this.frm.doc.time_logs || [])
+			.filter((d) => d.from_time || d.to_time)
+			.map((d) => ({ ...d, _title: this.get_title(d) }));
+		const editable = this.grid.is_editable();
+		return this.prepare_events(rows).map((d) => Object.assign(d, { editable }));
+	}
+
+	get_title(d) {
+		const parts = [d.activity_type, d.project_name || d.project].filter(Boolean);
+		return parts.join(" · ") || d.description || __("Time log");
+	}
+
+	// one colour per project, so a month reads at a glance
+	get_css_class(d) {
+		const key = d.project || d.activity_type;
+		if (!key) return "gray";
+		const colors = ["blue", "green", "orange", "purple", "pink", "cyan", "teal", "violet", "amber"];
+		let hash = 0;
+		for (const c of key) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+		return colors[Math.abs(hash) % colors.length];
+	}
+
+	open_row(name) {
+		const row = locals["Timesheet Detail"][name];
+		if (!row) return;
+		this.grid.grid_pagination.go_to_page(Math.ceil(row.idx / this.grid.grid_pagination.page_length));
+		this.grid.get_row(name)?.toggle_view(true);
+	}
+
+	async add_row(info) {
+		this.fullCalendar.unselect();
+		// in Month view a day click navigates instead
+		if (info.allDay) return;
+
+		const row = this.grid.add_new_row(null, null, false, null, true);
+		if (!row) return;
+		await this.set_times(row.name, info.start, info.end);
+		this.open_row(row.name);
+	}
+
+	move_row(event) {
+		return this.set_times(event.id, event.start, event.end);
+	}
+
+	// from_time first: the hours trigger then sets to_time and billing for the row
+	async set_times(name, start, end) {
+		await frappe.model.set_value("Timesheet Detail", name, "from_time", this.get_system_datetime(start));
+		await frappe.model.set_value("Timesheet Detail", name, "hours", (end - start) / 3600000);
+	}
+};
+
+frappe.ui.form.on("Timesheet", {
+	refresh(frm) {
+		// the form object is reused for the next Timesheet, so build one calendar per document
+		const calendar = frm.timesheet_calendar;
+		if (calendar?.docname === frm.doc.name) {
+			calendar.refresh?.();
+			return;
+		}
+
+		calendar?.fullCalendar?.destroy();
+		calendar?.parent.remove();
+		const $parent = $('<div class="timesheet-calendar mb-4">').insertBefore(
+			frm.fields_dict.time_logs.$wrapper
+		);
+		frm.timesheet_calendar = { docname: frm.doc.name, parent: $parent };
+		frappe.require("calendar.bundle.js").then(() => {
+			if (frm.timesheet_calendar?.parent !== $parent) return;
+			frm.timesheet_calendar = new erpnext.projects.TimesheetCalendar(frm, $parent);
+			frm.timesheet_calendar.docname = frm.doc.name;
+		});
+	},
+});
+
+const refresh_timesheet_calendar = (frm) => frm.timesheet_calendar?.refresh?.();
+
+frappe.ui.form.on("Timesheet Detail", {
+	time_logs_add: refresh_timesheet_calendar,
+	time_logs_remove: refresh_timesheet_calendar,
+	from_time: refresh_timesheet_calendar,
+	to_time: refresh_timesheet_calendar,
+	hours: refresh_timesheet_calendar,
+	activity_type: refresh_timesheet_calendar,
+	project: refresh_timesheet_calendar,
+	description: refresh_timesheet_calendar,
+});

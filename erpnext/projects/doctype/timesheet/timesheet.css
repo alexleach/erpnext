@@ -21,3 +21,8 @@
 	border-right: 1px dashed #fff;
 	border-bottom: 1px dashed #fff;
 }
+
+/* nearly every time log is in the past, so do not fade past events */
+.timesheet-calendar .fc-event.fc-event-past {
+	opacity: 1;
+}
