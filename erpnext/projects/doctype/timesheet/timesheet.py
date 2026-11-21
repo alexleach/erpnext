@@ -174,7 +174,8 @@ class Timesheet(Document):
 		return bool(previous and previous.time_logs) and (
 			dates
 			== (getdate(previous.start_date), getdate(previous.end_date))
-			== get_time_log_dates(previous.time_logs)
+			# a running timer has no To Time; at that save it counted as the day of the save
+			== get_time_log_dates(previous.time_logs, previous.modified)
 		)
 
 	def validate_time_logs_within_dates(self):
@@ -425,8 +426,12 @@ def get_task_status(task: Document) -> str:
 	return "Completed" if any(completed) else "Working"
 
 
-def get_time_log_dates(time_logs):
-	return min(getdate(d.from_time) for d in time_logs), max(getdate(d.to_time) for d in time_logs)
+def get_time_log_dates(time_logs, default=None):
+	"""Dates of the earliest From Time and latest To Time; a missing time counts as `default` (today)."""
+	return (
+		min(getdate(d.from_time or default) for d in time_logs),
+		max(getdate(d.to_time or default) for d in time_logs),
+	)
 
 
 @frappe.whitelist()

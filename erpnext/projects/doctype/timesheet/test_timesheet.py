@@ -4,6 +4,7 @@ import datetime
 from unittest.mock import patch
 
 import frappe
+from frappe.tests.classes.context_managers import freeze_time
 from frappe.utils import add_to_date, getdate, now_datetime, nowdate
 
 from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
@@ -143,6 +144,20 @@ class TestTimesheet(ERPNextTestSuite):
 
 		timesheet.end_date = "2026-10-01"
 		self.assertRaises(frappe.ValidationError, timesheet.save)
+
+	def test_timer_stopped_the_next_day_moves_the_end_date(self):
+		with freeze_time("2026-11-21 17:00:00"):
+			timesheet = make_timesheet_without_employee("2026-11-21 16:00:00", 1)
+			timesheet.time_logs[0].to_time = None
+			timesheet.insert()
+
+		with freeze_time("2026-11-22 10:00:00"):
+			timesheet.time_logs[0].update({"to_time": "2026-11-22 09:00:00", "hours": 17, "completed": 1})
+			timesheet.save()
+
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-21"), getdate("2026-11-22"))
+		)
 
 	def test_timesheet_base_amount(self):
 		emp = make_employee("test_employee_6@salary.com", company="_Test Company")
