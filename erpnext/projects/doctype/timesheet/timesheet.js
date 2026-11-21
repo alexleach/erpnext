@@ -501,7 +501,7 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 	make() {
 		super.make();
 		this.footnote_area.html(
-			__("In Week or Day view, drag across time slots to log time. Double-click a day to open it.")
+			__("In Week or Day view, drag across free time slots to log time. Double-click a day to open it.")
 		);
 	}
 
@@ -516,6 +516,9 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 			},
 			initialDate: this.frm.doc.start_date || undefined,
 			selectable: this.grid.is_editable(),
+			// ERPNext rejects overlapping time logs on save (unless Projects Settings allow them)
+			selectOverlap: false,
+			eventOverlap: false,
 			events: (info, success) => success(this.get_events()),
 			eventClick: (info) => this.open_row(info.event.id),
 			eventDrop: (info) => this.move_row(info.event),
