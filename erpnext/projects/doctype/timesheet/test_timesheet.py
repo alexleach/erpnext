@@ -4,7 +4,7 @@ import datetime
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import add_to_date, now_datetime, nowdate
+from frappe.utils import add_to_date, getdate, now_datetime, nowdate
 
 from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
@@ -114,6 +114,23 @@ class TestTimesheet(ERPNextTestSuite):
 		frappe.db.set_value("Task", task.name, "status", "Cancelled")
 		completed.cancel()
 		self.assertEqual(task_status(), "Cancelled")
+
+	def test_entered_dates_are_kept_and_widened_to_the_time_logs(self):
+		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2)
+		timesheet.update({"start_date": "2026-11-01", "end_date": "2026-11-30"})
+		timesheet.insert()
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-01"), getdate("2026-11-30"))
+		)
+
+		timesheet.append("time_logs", {"from_time": "2026-12-02 09:00:00", "to_time": "2026-12-02 11:00:00"})
+		timesheet.save()
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-01"), getdate("2026-12-02"))
+		)
+
+		timesheet.end_date = "2026-10-01"
+		self.assertRaises(frappe.ValidationError, timesheet.save)
 
 	def test_timesheet_base_amount(self):
 		emp = make_employee("test_employee_6@salary.com", company="_Test Company")

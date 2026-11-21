@@ -158,13 +158,15 @@ class Timesheet(Document):
 		self.user = frappe.db.get_value("Employee", self.employee, "user_id") if self.employee else self.owner
 
 	def set_dates(self):
+		self.validate_from_to_dates("start_date", "end_date")
 		if self.docstatus < 2 and self.time_logs:
 			start_date = min(getdate(d.from_time) for d in self.time_logs)
 			end_date = max(getdate(d.to_time) for d in self.time_logs)
 
+			# keep the entered period, widened to cover every time log
 			if start_date and end_date:
-				self.start_date = getdate(start_date)
-				self.end_date = getdate(end_date)
+				self.start_date = min(getdate(self.start_date or start_date), start_date)
+				self.end_date = max(getdate(self.end_date or end_date), end_date)
 
 	def before_cancel(self):
 		self.set_status()
