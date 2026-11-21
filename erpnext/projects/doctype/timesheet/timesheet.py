@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder.functions import Coalesce, Concat, Date, Round
-from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate
+from frappe.utils import cint, cstr, flt, formatdate, get_datetime, getdate, nowdate
 from frappe.utils.deprecations import deprecated
 
 from erpnext import _refuse, require_permission
@@ -163,10 +163,21 @@ class Timesheet(Document):
 			start_date = min(getdate(d.from_time) for d in self.time_logs)
 			end_date = max(getdate(d.to_time) for d in self.time_logs)
 
-			# keep the entered period, widened to cover every time log
 			if start_date and end_date:
-				self.start_date = min(getdate(self.start_date or start_date), start_date)
-				self.end_date = max(getdate(self.end_date or end_date), end_date)
+				self.start_date = getdate(self.start_date or start_date)
+				self.end_date = getdate(self.end_date or end_date)
+				self.validate_time_logs_within_dates()
+
+	def validate_time_logs_within_dates(self):
+		start_date, end_date = getdate(self.start_date), getdate(self.end_date)
+		for d in self.time_logs:
+			if getdate(d.from_time) < start_date or getdate(d.to_time) > end_date:
+				frappe.throw(
+					_("Row {0}: the time log must be between the Start Date {1} and End Date {2}.").format(
+						d.idx, formatdate(start_date), formatdate(end_date)
+					),
+					title=_("Time Log Outside Timesheet Dates"),
+				)
 
 	def before_cancel(self):
 		self.set_status()

@@ -115,19 +115,24 @@ class TestTimesheet(ERPNextTestSuite):
 		completed.cancel()
 		self.assertEqual(task_status(), "Cancelled")
 
-	def test_entered_dates_are_kept_and_widened_to_the_time_logs(self):
-		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2)
+	def test_time_logs_must_fall_within_the_timesheet_dates(self):
+		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2).insert()
+		self.assertEqual((timesheet.start_date, timesheet.end_date), (getdate("2026-11-10"),) * 2)
+
 		timesheet.update({"start_date": "2026-11-01", "end_date": "2026-11-30"})
-		timesheet.insert()
+		timesheet.save()
 		self.assertEqual(
 			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-01"), getdate("2026-11-30"))
 		)
 
-		timesheet.append("time_logs", {"from_time": "2026-12-02 09:00:00", "to_time": "2026-12-02 11:00:00"})
+		december_log = {"from_time": "2026-12-02 09:00:00", "to_time": "2026-12-02 11:00:00"}
+		timesheet.append("time_logs", december_log)
+		self.assertRaises(frappe.ValidationError, timesheet.save)
+
+		timesheet.reload()
+		timesheet.end_date = "2026-12-31"
+		timesheet.append("time_logs", december_log)
 		timesheet.save()
-		self.assertEqual(
-			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-01"), getdate("2026-12-02"))
-		)
 
 		timesheet.end_date = "2026-10-01"
 		self.assertRaises(frappe.ValidationError, timesheet.save)
