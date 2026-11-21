@@ -160,13 +160,22 @@ class Timesheet(Document):
 	def set_dates(self):
 		self.validate_from_to_dates("start_date", "end_date")
 		if self.docstatus < 2 and self.time_logs:
-			start_date = min(getdate(d.from_time) for d in self.time_logs)
-			end_date = max(getdate(d.to_time) for d in self.time_logs)
-
-			if start_date and end_date:
-				self.start_date = getdate(self.start_date or start_date)
-				self.end_date = getdate(self.end_date or end_date)
+			if self.dates_follow_time_logs():
+				self.start_date, self.end_date = get_time_log_dates(self.time_logs)
+			else:
 				self.validate_time_logs_within_dates()
+
+	def dates_follow_time_logs(self):
+		"""Dates left blank, or set from the time logs at the last save, keep following them."""
+		if not (self.start_date and self.end_date):
+			return True
+		previous = self.get_doc_before_save()
+		dates = (getdate(self.start_date), getdate(self.end_date))
+		return bool(previous and previous.time_logs) and (
+			dates
+			== (getdate(previous.start_date), getdate(previous.end_date))
+			== get_time_log_dates(previous.time_logs)
+		)
 
 	def validate_time_logs_within_dates(self):
 		start_date, end_date = getdate(self.start_date), getdate(self.end_date)
@@ -414,6 +423,10 @@ def get_task_status(task: Document) -> str:
 	if not completed:
 		return "Open"
 	return "Completed" if any(completed) else "Working"
+
+
+def get_time_log_dates(time_logs):
+	return min(getdate(d.from_time) for d in time_logs), max(getdate(d.to_time) for d in time_logs)
 
 
 @frappe.whitelist()

@@ -115,12 +115,19 @@ class TestTimesheet(ERPNextTestSuite):
 		completed.cancel()
 		self.assertEqual(task_status(), "Cancelled")
 
-	def test_time_logs_must_fall_within_the_timesheet_dates(self):
+	def test_entered_dates_reject_time_logs_outside_them(self):
 		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2).insert()
 		self.assertEqual((timesheet.start_date, timesheet.end_date), (getdate("2026-11-10"),) * 2)
 
+		timesheet.append("time_logs", {"from_time": "2026-11-12 09:00:00", "to_time": "2026-11-12 11:00:00"})
+		timesheet.save()
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-10"), getdate("2026-11-12"))
+		)
+
 		timesheet.update({"start_date": "2026-11-01", "end_date": "2026-11-30"})
 		timesheet.save()
+		timesheet.reload()
 		self.assertEqual(
 			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-01"), getdate("2026-11-30"))
 		)
