@@ -501,7 +501,9 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 	make() {
 		super.make();
 		this.footnote_area.html(
-			__("In Week or Day view, drag across time slots to log time. Double-click a day to open it.")
+			__(
+				"In Week or Day view, drag across time slots to log time. In Month view, drag across days to log the same hours on each. Double-click a day to open it."
+			)
 		);
 	}
 
@@ -581,13 +583,74 @@ erpnext.projects.TimesheetCalendar = class TimesheetCalendar extends frappe.view
 
 	async add_row(info) {
 		this.fullCalendar.unselect();
-		// in Month view a day click navigates instead
-		if (info.allDay) return;
+		if (info.allDay) {
+			// a single day click navigates instead
+			if (moment(info.end).diff(info.start, "days") > 1) this.add_rows_on_days(info.start, info.end);
+			return;
+		}
 
 		const row = this.grid.add_new_row(null, null, false, null, true);
 		if (!row) return;
 		await this.set_times(row.name, info.start, info.end);
 		this.open_row(row.name);
+	}
+
+	add_rows_on_days(start, end) {
+		const dialog = new frappe.ui.Dialog({
+			title: __("Log Time on Each Day"),
+			fields: [
+				{
+					fieldname: "from_time",
+					fieldtype: "Time",
+					label: __("From Time"),
+					default: "09:00:00",
+					reqd: 1,
+				},
+				{
+					fieldname: "to_time",
+					fieldtype: "Time",
+					label: __("To Time"),
+					default: "17:00:00",
+					reqd: 1,
+				},
+				{ fieldname: "skip_weekends", fieldtype: "Check", label: __("Skip Weekends"), default: 1 },
+				{ fieldtype: "Column Break" },
+				{
+					fieldname: "activity_type",
+					fieldtype: "Link",
+					options: "Activity Type",
+					label: __("Activity Type"),
+				},
+				{
+					fieldname: "project",
+					fieldtype: "Link",
+					options: "Project",
+					label: __("Project"),
+					get_query: () => this.grid.get_field("project").get_query?.(),
+				},
+				{ fieldtype: "Section Break" },
+				{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
+			],
+			primary_action_label: __("Add Time Logs"),
+			primary_action: async ({ from_time, to_time, skip_weekends, ...details }) => {
+				if (to_time <= from_time) {
+					frappe.throw(__("To Time must be after From Time."));
+				}
+				dialog.hide();
+				for (const day = moment(start); day.isBefore(end); day.add(1, "day")) {
+					if (skip_weekends && [0, 6].includes(day.day())) continue;
+					const date = day.format("YYYY-MM-DD");
+					const row = this.grid.add_new_row(null, null, false, null, true);
+					await this.set_times(
+						row.name,
+						moment(`${date} ${from_time}`).toDate(),
+						moment(`${date} ${to_time}`).toDate()
+					);
+					await frappe.model.set_value("Timesheet Detail", row.name, details);
+				}
+			},
+		});
+		dialog.show();
 	}
 
 	move_row(event) {
