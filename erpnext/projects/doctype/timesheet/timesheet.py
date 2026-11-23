@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder.functions import Coalesce, Concat, Date, Round
-from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate
+from frappe.utils import cint, cstr, flt, formatdate, get_datetime, getdate, nowdate
 from frappe.utils.deprecations import deprecated
 
 from erpnext import _refuse, require_permission
@@ -158,13 +158,37 @@ class Timesheet(Document):
 		self.user = frappe.db.get_value("Employee", self.employee, "user_id") if self.employee else self.owner
 
 	def set_dates(self):
+		self.validate_from_to_dates("start_date", "end_date")
 		if self.docstatus < 2 and self.time_logs:
-			start_date = min(getdate(d.from_time) for d in self.time_logs)
-			end_date = max(getdate(d.to_time) for d in self.time_logs)
+			if self.dates_follow_time_logs():
+				self.start_date, self.end_date = get_time_log_dates(self.time_logs)
+			else:
+				self.validate_time_logs_within_dates()
 
-			if start_date and end_date:
-				self.start_date = getdate(start_date)
-				self.end_date = getdate(end_date)
+	def dates_follow_time_logs(self):
+		"""Dates left blank, or set from the time logs at the last save, keep following them."""
+		if not (self.start_date and self.end_date):
+			return True
+		previous = self.get_doc_before_save()
+		dates = (getdate(self.start_date), getdate(self.end_date))
+		return bool(previous and previous.time_logs) and (
+			dates
+			== (getdate(previous.start_date), getdate(previous.end_date))
+			# a running timer has no To Time; at that save it counted as the day of the save
+			== get_time_log_dates(previous.time_logs, previous.modified)
+		)
+
+	def validate_time_logs_within_dates(self):
+		start_date, end_date = getdate(self.start_date), getdate(self.end_date)
+		for d in self.time_logs:
+			# a running timer has no To Time yet
+			if any(not start_date <= getdate(t) <= end_date for t in (d.from_time, d.to_time) if t):
+				frappe.throw(
+					_("Row {0}: the time log must be between the Start Date {1} and End Date {2}.").format(
+						d.idx, formatdate(start_date), formatdate(end_date)
+					),
+					title=_("Time Log Outside Timesheet Dates"),
+				)
 
 	def before_cancel(self):
 		self.set_status()
@@ -401,6 +425,14 @@ def get_task_status(task: Document) -> str:
 	if not completed:
 		return "Open"
 	return "Completed" if any(completed) else "Working"
+
+
+def get_time_log_dates(time_logs, default=None):
+	"""Dates of the earliest From Time and latest To Time; a missing time counts as `default` (today)."""
+	return (
+		min(getdate(d.from_time or default) for d in time_logs),
+		max(getdate(d.to_time or default) for d in time_logs),
+	)
 
 
 @frappe.whitelist()

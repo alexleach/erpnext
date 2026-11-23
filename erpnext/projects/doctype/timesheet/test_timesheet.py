@@ -4,7 +4,8 @@ import datetime
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import add_to_date, now_datetime, nowdate
+from frappe.tests.classes.context_managers import freeze_time
+from frappe.utils import add_to_date, getdate, now_datetime, nowdate
 
 from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
@@ -114,6 +115,62 @@ class TestTimesheet(ERPNextTestSuite):
 		frappe.db.set_value("Task", task.name, "status", "Cancelled")
 		completed.cancel()
 		self.assertEqual(task_status(), "Cancelled")
+
+	def test_entered_dates_reject_time_logs_outside_them(self):
+		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2).insert()
+		self.assertEqual((timesheet.start_date, timesheet.end_date), (getdate("2026-11-10"),) * 2)
+
+		timesheet.append("time_logs", {"from_time": "2026-11-12 09:00:00", "to_time": "2026-11-12 11:00:00"})
+		timesheet.save()
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-10"), getdate("2026-11-12"))
+		)
+
+		timesheet.update({"start_date": "2026-11-01", "end_date": "2026-11-30"})
+		timesheet.save()
+		timesheet.reload()
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-01"), getdate("2026-11-30"))
+		)
+
+		december_log = {"from_time": "2026-12-02 09:00:00", "to_time": "2026-12-02 11:00:00"}
+		timesheet.append("time_logs", december_log)
+		self.assertRaises(frappe.ValidationError, timesheet.save)
+
+		timesheet.reload()
+		timesheet.end_date = "2026-12-31"
+		timesheet.append("time_logs", december_log)
+		timesheet.save()
+
+		timesheet.end_date = "2026-10-01"
+		self.assertRaises(frappe.ValidationError, timesheet.save)
+
+	def test_timer_stopped_the_next_day_moves_the_end_date(self):
+		with freeze_time("2026-11-21 17:00:00"):
+			timesheet = make_timesheet_without_employee("2026-11-21 16:00:00", 1)
+			timesheet.time_logs[0].to_time = None
+			timesheet.insert()
+
+		with freeze_time("2026-11-22 10:00:00"):
+			timesheet.time_logs[0].update({"to_time": "2026-11-22 09:00:00", "hours": 17, "completed": 1})
+			timesheet.save()
+
+		self.assertEqual(
+			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-21"), getdate("2026-11-22"))
+		)
+
+	@freeze_time("2026-11-23 10:00:00")
+	def test_entered_dates_check_time_logs_without_to_time(self):
+		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2)
+		timesheet.update({"start_date": "2026-11-01", "end_date": "2026-11-30"})
+		timesheet.insert()
+
+		timesheet.append("time_logs", {"from_time": "2026-12-02 09:00:00"})
+		self.assertRaises(frappe.ValidationError, timesheet.save)
+
+		timesheet.reload()
+		timesheet.append("time_logs", {"from_time": "2026-11-23 09:00:00"})
+		timesheet.save()
 
 	def test_timesheet_base_amount(self):
 		emp = make_employee("test_employee_6@salary.com", company="_Test Company")
