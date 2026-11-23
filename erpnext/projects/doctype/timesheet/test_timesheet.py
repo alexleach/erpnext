@@ -159,6 +159,19 @@ class TestTimesheet(ERPNextTestSuite):
 			(timesheet.start_date, timesheet.end_date), (getdate("2026-11-21"), getdate("2026-11-22"))
 		)
 
+	@freeze_time("2026-11-23 10:00:00")
+	def test_entered_dates_check_time_logs_without_to_time(self):
+		timesheet = make_timesheet_without_employee("2026-11-10 09:00:00", 2)
+		timesheet.update({"start_date": "2026-11-01", "end_date": "2026-11-30"})
+		timesheet.insert()
+
+		timesheet.append("time_logs", {"from_time": "2026-12-02 09:00:00"})
+		self.assertRaises(frappe.ValidationError, timesheet.save)
+
+		timesheet.reload()
+		timesheet.append("time_logs", {"from_time": "2026-11-23 09:00:00"})
+		timesheet.save()
+
 	def test_timesheet_base_amount(self):
 		emp = make_employee("test_employee_6@salary.com", company="_Test Company")
 		timesheet = make_timesheet(emp, simulate=True, is_billable=1)

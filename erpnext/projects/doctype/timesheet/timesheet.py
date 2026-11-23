@@ -181,7 +181,8 @@ class Timesheet(Document):
 	def validate_time_logs_within_dates(self):
 		start_date, end_date = getdate(self.start_date), getdate(self.end_date)
 		for d in self.time_logs:
-			if getdate(d.from_time) < start_date or getdate(d.to_time) > end_date:
+			# a running timer has no To Time yet
+			if any(not start_date <= getdate(t) <= end_date for t in (d.from_time, d.to_time) if t):
 				frappe.throw(
 					_("Row {0}: the time log must be between the Start Date {1} and End Date {2}.").format(
 						d.idx, formatdate(start_date), formatdate(end_date)
