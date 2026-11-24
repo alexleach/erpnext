@@ -6,6 +6,7 @@ from collections import defaultdict
 import frappe
 from frappe.utils import cint, flt, get_datetime, get_time
 
+from erpnext.manufacturing.doctype.work_order.mapper import get_operation_qty, get_upstream_process_loss
 from erpnext.manufacturing.scheduling.models import Interval, Resource, ResourceCalendar, Task
 
 
@@ -55,10 +56,11 @@ def get_workstation_calendar(row, settings):
 	return ResourceCalendar(daily_windows=daily_windows, holidays=holidays)
 
 
-def get_booked_load(resource_names, from_date):
+def get_booked_load(resource_names, from_date, exclude_plan=None):
 	load = defaultdict(list)
 	add_booked_intervals(load, "Job Card Scheduled Time", resource_names, from_date, drafts_only=True)
 	add_booked_intervals(load, "Job Card Time Log", resource_names, from_date, drafts_only=False)
+	add_plan_schedule_intervals(load, resource_names, from_date, exclude_plan)
 	return load
 
 
@@ -83,6 +85,132 @@ def add_booked_intervals(load, doctype, resource_names, from_date, drafts_only):
 
 	for row in query.run(as_dict=True):
 		load[row.workstation].append(Interval(get_datetime(row.from_time), get_datetime(row.to_time)))
+
+
+def add_plan_schedule_intervals(load, resource_names, from_date, exclude_plan):
+	schedule = frappe.qb.DocType("Production Plan Schedule")
+	plan = frappe.qb.DocType("Production Plan")
+
+	query = (
+		frappe.qb.from_(schedule)
+		.join(plan)
+		.on(schedule.production_plan == plan.name)
+		.select(
+			schedule.workstation,
+			schedule.from_time,
+			schedule.to_time,
+			schedule.production_plan,
+			schedule.plan_row,
+			schedule.operation,
+		)
+		.where(
+			schedule.workstation.isin(resource_names)
+			& (schedule.to_time > from_date)
+			& (plan.docstatus < 2)
+			& (plan.status != "Closed")
+		)
+	)
+
+	if exclude_plan:
+		query = query.where(schedule.production_plan != exclude_plan)
+
+	for row in filter_covered_schedule_rows(query.run(as_dict=True)):
+		load[row.workstation].append(Interval(get_datetime(row.from_time), get_datetime(row.to_time)))
+
+
+def filter_covered_schedule_rows(rows):
+	"""A schedule block steps aside only when job cards carrying booked load (scheduled
+	time or logged time) cover the required quantity of each work order on its plan row and
+	operation. Partial coverage - a batch-split card deleted, capacity planning disabled - keeps the block,
+	trading double-booked load for never silently freeing a reserved interval."""
+	plans = {row.production_plan for row in rows}
+	if not plans:
+		return rows
+
+	covered = get_covered_operations(plans)
+	return [row for row in rows if (row.production_plan, row.plan_row, row.operation) not in covered]
+
+
+def get_covered_operations(production_plans):
+	"""Plan row operations whose every work order has job cards for its required qty."""
+	required, carried = get_job_card_coverage(production_plans)
+	precision = frappe.get_precision("Work Order Operation", "completed_qty")
+	short = {
+		key[:3] for key, qty in required.items() if flt(carried.get(key), precision) < flt(qty, precision)
+	}
+	return {key[:3] for key in required} - short
+
+
+def get_job_card_coverage(production_plans):
+	work_orders = frappe.get_all(
+		"Work Order",
+		filters={"production_plan": ("in", list(production_plans)), "docstatus": ("<", 2)},
+		fields=[
+			"name",
+			"qty",
+			"track_semi_finished_goods",
+			"production_plan",
+			"production_plan_item",
+			"production_plan_sub_assembly_item",
+		],
+	)
+	if not work_orders:
+		return {}, {}
+
+	return get_required_operation_qty(work_orders), get_carried_operation_qty(work_orders)
+
+
+def get_required_operation_qty(work_orders):
+	"""Operation qty net of the process loss of earlier operations, as job cards are made for it."""
+	by_name = {row.name: row for row in work_orders}
+	operations = frappe.get_all(
+		"Work Order Operation",
+		filters={"parent": ("in", list(by_name))},
+		fields=["parent", "operation", "output_qty", "sequence_id", "completed_qty", "process_loss_qty"],
+	)
+	for operation_row in operations:
+		by_name[operation_row.parent].setdefault("operations", []).append(operation_row)
+
+	required = defaultdict(float)
+	for operation_row in operations:
+		work_order = by_name[operation_row.parent]
+		upstream_loss = get_upstream_process_loss(work_order, operation_row)
+		qty = get_operation_qty(work_order, operation_row) - upstream_loss
+		add_operation_qty(required, work_order, operation_row.operation, qty)
+
+	return required
+
+
+def get_carried_operation_qty(work_orders):
+	by_name = {row.name: row for row in work_orders}
+	job_cards = frappe.get_all(
+		"Job Card",
+		filters={"work_order": ("in", list(by_name)), "docstatus": ("<", 2)},
+		fields=["name", "work_order", "operation", "for_quantity", "total_time_in_mins"],
+	)
+
+	with_scheduled_time = get_job_cards_with_scheduled_time(job_cards)
+	carried = defaultdict(float)
+	for job_card in job_cards:
+		if flt(job_card.total_time_in_mins) or job_card.name in with_scheduled_time:
+			work_order = by_name[job_card.work_order]
+			add_operation_qty(carried, work_order, job_card.operation, flt(job_card.for_quantity))
+
+	return carried
+
+
+def get_job_cards_with_scheduled_time(job_cards):
+	names = [job_card.name for job_card in job_cards]
+	if not names:
+		return set()
+
+	return set(frappe.get_all("Job Card Scheduled Time", filters={"parent": ("in", names)}, pluck="parent"))
+
+
+def add_operation_qty(bucket, work_order, operation, qty):
+	for plan_row in (work_order.production_plan_item, work_order.production_plan_sub_assembly_item):
+		if plan_row:
+			bucket[(work_order.production_plan, plan_row, operation, work_order.name)] += qty
 
 
 def build_bom_operation_tasks(bom_no, qty, prefix, earliest_start=None, priority=0):
