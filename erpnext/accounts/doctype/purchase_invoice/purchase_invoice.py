@@ -342,11 +342,21 @@ class PurchaseInvoice(BuyingController):
 		self.reset_default_field_value("set_from_warehouse", "items", "from_warehouse")
 		PurchaseTaxWithholding(self).on_validate()
 		self.set_percentage_received()
+		self.validate_item_subscriptions()
 
 		if self.on_hold:
 			self.validate_invoice_hold()
 
 		pre_submit_validation(self, check_prev_docstatus=True)
+
+	def validate_item_subscriptions(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.supplier, "Supplier")
+
+		for item in self.items:
+			item.validate_subscription(self.supplier)
 
 	def set_percentage_received(self):
 		total_billed_qty = 0.0
@@ -816,10 +826,10 @@ class PurchaseInvoice(BuyingController):
 
 		self.process_common_party_accounting()
 
-		if self.is_return:
-			if self.return_against:
-				frappe.get_doc(self.doctype, self.return_against).set_status(update=True)
-			self.refresh_subscription_status()
+		if self.is_return and self.return_against:
+			frappe.get_doc(self.doctype, self.return_against).set_status(update=True)
+
+		self.refresh_subscription_status()
 
 	def on_update_after_submit(self):
 		fields_to_check = [
@@ -834,9 +844,31 @@ class PurchaseInvoice(BuyingController):
 			self.validate_for_repost()
 			self.repost_accounting_entries()
 
+		self.refresh_subscription_status()
+
 	def refresh_subscription_status(self):
-		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
+		if self.flags.from_subscription_generation:
+			# Subscription.generate_invoice() submits this invoice as part of its own
+			# process()/cancel_subscription() flow, which already recalculates and
+			# saves the subscription's status right after. Doing it again here would
+			# reload and save the same Subscription while that outer call is still
+			# mid-save, racing it into a TimestampMismatchError.
+			return
+
+		from erpnext.accounts.doctype.subscription.subscription import get_document_subscription_names
+
+		subscriptions = get_document_subscription_names(self)
+
+		# Both subscription fields are allow_on_submit, so an already-submitted
+		# invoice's links can change without going through submit/cancel. Refresh
+		# whatever was linked before the edit too, so a removed/replaced link still
+		# gets its old subscription's status brought up to date.
+		doc_before_save = self.get_doc_before_save()
+		if doc_before_save:
+			subscriptions |= get_document_subscription_names(doc_before_save)
+
+		for subscription in subscriptions:
+			refresh_subscription_status(subscription)
 
 	def make_gl_entries(self, gl_entries=None, from_repost=False):
 		update_outstanding = "No" if (cint(self.is_paid) or self.write_off_account) else "Yes"

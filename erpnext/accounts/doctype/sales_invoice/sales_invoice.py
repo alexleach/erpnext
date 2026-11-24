@@ -334,6 +334,7 @@ class SalesInvoice(SellingController):
 		FixedAssetService(self).validate_fixed_asset()
 		FixedAssetService(self).set_income_account_for_fixed_assets()
 		self.validate_item_cost_centers()
+		self.validate_item_subscriptions()
 		self.check_conversion_rate()
 		self.validate_accounts()
 
@@ -435,6 +436,15 @@ class SalesInvoice(SellingController):
 	def validate_item_cost_centers(self):
 		for item in self.items:
 			item.validate_cost_center(self.company)
+
+	def validate_item_subscriptions(self):
+		if self.get("subscription"):
+			from erpnext.accounts.doctype.subscription.subscription import validate_subscription_party
+
+			validate_subscription_party(self.subscription, self.customer, "Customer")
+
+		for item in self.items:
+			item.validate_subscription(self.customer)
 
 	def validate_income_account(self):
 		for item in self.get("items"):
@@ -539,10 +549,10 @@ class SalesInvoice(SellingController):
 		self.process_common_party_accounting()
 		self.update_billed_qty_in_scio()
 
-		if self.is_return:
-			if self.return_against:
-				frappe.get_doc(self.doctype, self.return_against).set_status(update=True)
-			self.refresh_subscription_status()
+		if self.is_return and self.return_against:
+			frappe.get_doc(self.doctype, self.return_against).set_status(update=True)
+
+		self.refresh_subscription_status()
 
 	def before_cancel(self):
 		validate_deferred_revenue_return_cancellation(self)
@@ -774,8 +784,28 @@ class SalesInvoice(SellingController):
 		return POSService(self).set_pos_fields(for_validate)
 
 	def refresh_subscription_status(self):
-		if self.get("subscription"):
-			refresh_subscription_status(self.subscription)
+		if self.flags.from_subscription_generation:
+			# Subscription.generate_invoice() submits this invoice as part of its own
+			# process()/cancel_subscription() flow, which already recalculates and
+			# saves the subscription's status right after. Doing it again here would
+			# reload and save the same Subscription while that outer call is still
+			# mid-save, racing it into a TimestampMismatchError.
+			return
+
+		from erpnext.accounts.doctype.subscription.subscription import get_document_subscription_names
+
+		subscriptions = get_document_subscription_names(self)
+
+		# Both subscription fields are allow_on_submit, so an already-submitted
+		# invoice's links can change without going through submit/cancel. Refresh
+		# whatever was linked before the edit too, so a removed/replaced link still
+		# gets its old subscription's status brought up to date.
+		doc_before_save = self.get_doc_before_save()
+		if doc_before_save:
+			subscriptions |= get_document_subscription_names(doc_before_save)
+
+		for subscription in subscriptions:
+			refresh_subscription_status(subscription)
 
 	@frappe.whitelist()
 	def reset_mode_of_payments(self):
@@ -1304,6 +1334,8 @@ class SalesInvoice(SellingController):
 		if needs_repost:
 			self.validate_for_repost()
 			self.repost_accounting_entries()
+
+		self.refresh_subscription_status()
 
 	def counts_coupon_use(self):
 		# Returns and POS consolidation do not redeem the coupon again.

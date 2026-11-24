@@ -187,6 +187,11 @@
   "party_account_currency",
   "proforma_tab",
   "proforma_html",
+  "subscription_section",
+  "subscription",
+  "column_break_aanf",
+  "subscription_start_date",
+  "subscription_end_date",
   "connections_tab"
  ],
  "fields": [
@@ -1821,6 +1826,35 @@
    "label": "Title",
    "no_copy": 1,
    "print_hide": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription",
+   "fieldtype": "Link",
+   "label": "Subscription",
+   "options": "Subscription"
+  },
+  {
+   "fieldname": "column_break_aanf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_start_date",
+   "fieldtype": "Date",
+   "label": "Subscription Start Date"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_end_date",
+   "fieldtype": "Date",
+   "label": "Subscription End Date"
   }
  ],
  "grid_page_length": 50,
@@ -1829,7 +1863,7 @@
  "is_submittable": 1,
  "link_display_mode": "Search",
  "links": [],
- "modified": "2026-11-16 04:16:51.560603",
+ "modified": "2026-11-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Sales Order",

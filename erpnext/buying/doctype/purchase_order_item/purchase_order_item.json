@@ -115,7 +115,12 @@
   "production_plan_sub_assembly_item",
   "page_break",
   "column_break_pjyo",
-  "job_card"
+  "job_card",
+  "subscription_section",
+  "subscription",
+  "column_break_ecea",
+  "subscription_start_date",
+  "subscription_end_date"
  ],
  "fields": [
   {
@@ -960,6 +965,34 @@
    "non_negative": 1,
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "subscription_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription",
+   "fieldtype": "Link",
+   "label": "Subscription",
+   "options": "Subscription"
+  },
+  {
+   "fieldname": "column_break_ecea",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_start_date",
+   "fieldtype": "Date",
+   "label": "Subscription Start Date"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "subscription_end_date",
+   "fieldtype": "Date",
+   "label": "Subscription End Date"
   }
  ],
  "grid_page_length": 50,
@@ -967,7 +1000,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-15 18:00:00.000000",
+ "modified": "2026-11-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Buying",
  "name": "Purchase Order Item",
